@@ -1,0 +1,195 @@
+import type { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Http, idem, makeTenant, system, type Fixture } from './helpers';
+
+/**
+ * Testes ponta a ponta da API (in-process, PostgreSQL + Redis reais):
+ * isolamento por endpoint, concorrência, quotas, suspensão e fluxo completo da OS.
+ */
+let nest: INestApplication;
+let base: string;
+
+beforeAll(async () => {
+  process.env.API_PORT = '0';
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createApp } = require('../../apps/api/dist/bootstrap');
+  nest = await createApp();
+  await nest.listen(0, '127.0.0.1');
+  const addr = nest.getHttpServer().address();
+  base = `http://127.0.0.1:${addr.port}`;
+});
+
+afterAll(async () => {
+  await nest?.close();
+  await system.$disconnect();
+});
+
+async function product(f: Fixture, onHand: number, priceCents = 5000) {
+  const p = await system.product.create({ data: { tenantId: f.tenantId, sku: `P-${randomUUID().slice(0, 8)}`, name: 'Película', priceCents, costCents: 1000 } });
+  await system.stockBalance.create({ data: { tenantId: f.tenantId, locationId: f.locationId, productId: p.id, onHand } });
+  return p;
+}
+
+describe('isolamento entre empresas nos endpoints', () => {
+  let A: Fixture;
+  let B: Fixture;
+  let a: Http;
+  let b: Http;
+  beforeAll(async () => {
+    A = await makeTenant('Iso A');
+    B = await makeTenant('Iso B');
+    a = await new Http(base).login(A.ownerEmail);
+    b = await new Http(base).login(B.ownerEmail);
+  });
+
+  it('cliente, OS e venda de B são invisíveis para A', async () => {
+    const c = await b.req('POST', '/customers', { name: 'Cliente B', phone: '11988887777' });
+    expect(c.status).toBe(201);
+    expect((await a.req('GET', `/customers/${c.body.id}`)).status).toBe(404);
+    const list = await a.req('GET', '/customers', undefined);
+    expect(list.body.items.find((x: { id: string }) => x.id === c.body.id)).toBeUndefined();
+    const os = await b.req('POST', '/service-orders', { branchId: B.branchId, customerId: c.body.id, device: { brand: 'S', model: 'A' }, reportedIssue: 'Tela' }, { 'Idempotency-Key': idem() });
+    expect(os.status).toBe(201);
+    expect((await a.req('GET', `/service-orders/${os.body.order.id}`)).status).toBe(404);
+    expect((await a.req('GET', `/service-orders/${os.body.order.id}/pdf`)).status).toBe(404);
+    // branch_id de outra empresa no corpo é rejeitado
+    expect((await a.req('POST', '/service-orders', { branchId: B.branchId, customerId: c.body.id, device: { brand: 'S', model: 'A' }, reportedIssue: 'x' }, { 'Idempotency-Key': idem() })).status).toBe(403);
+  });
+
+  it('portal público não aceita número de OS sem o token correto', async () => {
+    const r = await new Http(base).req('POST', '/public/status/lookup', { orderNumber: 1, token: 'x'.repeat(32) });
+    expect(r.status).toBe(404);
+  });
+});
+
+describe('concorrência', () => {
+  let A: Fixture;
+  let a: Http;
+  let session: string;
+  beforeAll(async () => {
+    A = await makeTenant('Conc');
+    a = await new Http(base).login(A.ownerEmail);
+    session = (await a.req('POST', '/cash-sessions/open', { registerId: A.registerId, openingFloatCents: 10000 }, { 'Idempotency-Key': idem() })).body.id;
+  });
+
+  it('duas vendas da última unidade: apenas uma confirma', async () => {
+    const p = await product(A, 1);
+    const mk = () => a.req('POST', '/sales', { branchId: A.branchId, items: [{ productId: p.id, qty: 1 }] }, { 'Idempotency-Key': idem() });
+    const [s1, s2] = await Promise.all([mk(), mk()]);
+    const confirm = (id: string) => a.req('POST', `/sales/${id}/confirm`, { cashSessionId: session, payments: [{ method: 'PIX', amountCents: 5000 }] }, { 'Idempotency-Key': idem() });
+    const results = await Promise.all([confirm(s1.body.id), confirm(s2.body.id)]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(results.find((r) => r.status === 409)!.body.code).toBe('INSUFFICIENT_STOCK');
+  });
+
+  it('clique duplo / mesma Idempotency-Key não duplica pagamento', async () => {
+    const p = await product(A, 5);
+    const sale = await a.req('POST', '/sales', { branchId: A.branchId, items: [{ productId: p.id, qty: 1 }] }, { 'Idempotency-Key': idem() });
+    const key = idem();
+    const body = { cashSessionId: session, payments: [{ method: 'CASH', amountCents: 5000, tenderedCents: 10000 }] };
+    const [r1, r2] = await Promise.all([a.req('POST', `/sales/${sale.body.id}/confirm`, body, { 'Idempotency-Key': key }), a.req('POST', `/sales/${sale.body.id}/confirm`, body, { 'Idempotency-Key': key })]);
+    expect([r1.status, r2.status]).toContain(200);
+    const replay = await a.req('POST', `/sales/${sale.body.id}/confirm`, body, { 'Idempotency-Key': key });
+    expect(replay.status).toBe(200);
+    expect(replay.body.changeCents).toBe(5000);
+    const payments = await system.payment.count({ where: { tenantId: A.tenantId, allocations: { some: { receivable: { sourceId: sale.body.id } } } } });
+    expect(payments).toBe(1);
+  });
+
+  it('duas sangrias simultâneas não ultrapassam o dinheiro do caixa', async () => {
+    const s = await a.req('GET', `/cash-sessions/${session}/summary`);
+    const available = s.body.expected.CASH as number;
+    const w = () => a.req('POST', `/cash-sessions/${session}/withdraw`, { amountCents: available, reason: 'Sangria teste' }, { 'Idempotency-Key': idem() });
+    const res = await Promise.all([w(), w()]);
+    expect(res.map((r) => r.status).sort()).toEqual([201, 422]);
+  });
+
+  it('OS com versão desatualizada é rejeitada', async () => {
+    const c = await a.req('POST', '/customers', { name: 'Versão', phone: '11977776666' });
+    const os = await a.req('POST', '/service-orders', { branchId: A.branchId, customerId: c.body.id, device: { brand: 'M', model: 'G' }, reportedIssue: 'Bateria' }, { 'Idempotency-Key': idem() });
+    const ok = await a.req('PATCH', `/service-orders/${os.body.order.id}`, { version: 0, priority: 'HIGH' });
+    expect(ok.status).toBe(200);
+    const stale = await a.req('PATCH', `/service-orders/${os.body.order.id}`, { version: 0, priority: 'LOW' });
+    expect(stale.status).toBe(409);
+    expect(stale.body.code).toBe('VERSION_CONFLICT');
+  });
+});
+
+describe('quotas do plano e suspensão', () => {
+  it('ESSENCIAL não cria segunda filial (PLAN_LIMIT_REACHED)', async () => {
+    const E = await makeTenant('Essencial', 'ESSENCIAL');
+    const e = await new Http(base).login(E.ownerEmail);
+    const r = await e.req('POST', '/branches', { name: 'Segunda' });
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('PLAN_LIMIT_REACHED');
+    expect(r.body.details).toMatchObject({ kind: 'branches', limit: 1, current: 1, plan: 'ESSENCIAL' });
+  });
+
+  it('criações concorrentes de filial não ultrapassam o limite', async () => {
+    const P = await makeTenant('Prof', 'PROFISSIONAL');
+    await system.branch.create({ data: { tenantId: P.tenantId, name: 'Dois' } });
+    const p = await new Http(base).login(P.ownerEmail);
+    const res = await Promise.all([p.req('POST', '/branches', { name: 'X' }), p.req('POST', '/branches', { name: 'Y' })]);
+    expect(res.map((r) => r.status).sort()).toEqual([201, 409]);
+  });
+
+  it('empresa suspensa consulta dados mas não cria OS nem vendas', async () => {
+    const S = await makeTenant('Suspensa', 'PROFISSIONAL', 'SUSPENDED');
+    const s = await new Http(base).login(S.ownerEmail);
+    expect((await s.req('GET', '/service-orders')).status).toBe(200);
+    const c = await s.req('POST', '/customers', { name: 'X', phone: '11966665555' });
+    expect(c.status).toBe(402);
+    expect(c.body.code).toBe('SUBSCRIPTION_INACTIVE');
+  });
+});
+
+describe('fluxo completo da OS', () => {
+  it('recepção → diagnóstico → orçamento → aprovação → reparo → baixa de peça → conclusão → pagamento → entrega → PDF', async () => {
+    const F = await makeTenant('Fluxo');
+    const h = await new Http(base).login(F.ownerEmail);
+    const part = await product(F, 3, 15000);
+    const session = (await h.req('POST', '/cash-sessions/open', { registerId: F.registerId, openingFloatCents: 0 }, { 'Idempotency-Key': idem() })).body.id;
+    const c = await h.req('POST', '/customers', { name: 'Maria', phone: '11955554444', consentWhatsapp: true });
+    const created = await h.req('POST', '/service-orders', { branchId: F.branchId, customerId: c.body.id, device: { brand: 'Samsung', model: 'A54' }, reportedIssue: 'Tela quebrada', technicianUserId: F.ownerUserId }, { 'Idempotency-Key': idem() });
+    expect(created.status).toBe(201);
+    expect(created.body.trackingToken).toBeTruthy();
+    const id = created.body.order.id;
+    let v = async () => (await h.req('GET', `/service-orders/${id}`)).body.version as number;
+    expect((await h.req('POST', `/service-orders/${id}/start-diagnosis`, { version: await v() })).status).toBe(200);
+    const q = await h.req('POST', `/service-orders/${id}/quotes`, { lines: [{ kind: 'PART', productId: part.id, description: 'Tela', qty: 1, unitPriceCents: 15000 }, { kind: 'LABOR', description: 'Mão de obra', qty: 1, unitPriceCents: 5000 }] });
+    expect(q.status).toBe(201);
+    expect((await h.req('POST', `/service-orders/${id}/submit-diagnosis`, { version: await v(), diagnosis: 'Display danificado' })).status).toBe(200);
+    expect((await h.req('POST', `/quotes/${q.body.id}/send`)).status).toBe(200);
+    // sem aprovação não há reparo
+    expect((await h.req('POST', `/service-orders/${id}/start-repair`, { version: await v() })).status).toBe(409);
+    expect((await h.req('POST', `/quotes/${q.body.id}/approve`, { customerName: 'Maria', method: 'IN_PERSON' })).status).toBe(200);
+    expect((await h.req('POST', `/service-orders/${id}/start-repair`, { version: await v() })).status).toBe(200);
+    const res = await h.req('POST', '/stock/reserve', { orderId: id, productId: part.id, quantity: 1 }, { 'Idempotency-Key': idem() });
+    expect(res.status).toBe(201);
+    expect((await h.req('POST', '/stock/consume', { reservationId: res.body.id }, { 'Idempotency-Key': idem() })).status).toBe(200);
+    expect((await h.req('POST', `/service-orders/${id}/start-testing`, { version: await v() })).status).toBe(200);
+    const checklist = (await h.req('GET', '/settings')).body['os.post_repair_checklist'].map((i: { key: string; label: string }) => ({ ...i, ok: true }));
+    expect((await h.req('POST', `/service-orders/${id}/complete-repair`, { version: await v(), checklist: checklist.slice(1) })).status).toBe(422);
+    expect((await h.req('POST', `/service-orders/${id}/complete-repair`, { version: await v(), checklist })).status).toBe(200);
+    // entrega sem pagamento é bloqueada
+    expect((await h.req('POST', `/service-orders/${id}/deliver`, { version: await v(), receivedByName: 'Maria' }, { 'Idempotency-Key': idem() })).status).toBe(422);
+    const order = (await h.req('GET', `/service-orders/${id}`)).body;
+    expect(order.receivable.amountCents).toBe(20000);
+    const pay = await h.req('POST', '/payments', { branchId: F.branchId, cashSessionId: session, receivableId: order.receivable.id, parts: [{ method: 'PIX', amountCents: 10000 }, { method: 'CASH', amountCents: 10000 }] }, { 'Idempotency-Key': idem() });
+    expect(pay.status).toBe(201);
+    expect((await h.req('POST', `/service-orders/${id}/deliver`, { version: await v(), receivedByName: 'Maria' }, { 'Idempotency-Key': idem() })).status).toBe(200);
+    const final = (await h.req('GET', `/service-orders/${id}`)).body;
+    expect(final.deliveryStatus).toBe('DELIVERED');
+    expect(final.paymentStatus).toBe('PAID');
+    const outbox = await system.notificationOutbox.findMany({ where: { tenantId: F.tenantId, aggregateId: id } });
+    expect(outbox.map((e) => e.eventType)).toEqual(expect.arrayContaining(['os.created', 'quote.sent', 'quote.approved', 'os.ready', 'os.delivered']));
+    const pdf = await fetch(`${base}/api/v1/service-orders/${id}/pdf?type=pickup`, { headers: { Authorization: `Bearer ${h.token}` } });
+    expect(pdf.headers.get('content-type')).toContain('application/pdf');
+    const ledger = await system.financialLedger.groupBy({ by: ['entryType'], where: { tenantId: F.tenantId }, _sum: { amountCents: true } });
+    const sum = Object.fromEntries(ledger.map((l) => [l.entryType, l._sum.amountCents]));
+    expect(sum.REVENUE_SERVICE).toBe(20000);
+    expect(sum.PAYMENT_RECEIVED).toBe(20000);
+    expect(sum.COGS).toBe(1000);
+  });
+});

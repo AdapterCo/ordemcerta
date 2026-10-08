@@ -1,0 +1,135 @@
+# Stack completa (desenvolvimento/self-hosted). Produção: combine com docker-compose.prod.yml.
+#   docker compose up -d postgres redis minio && docker compose run --rm migrate && docker compose up -d
+name: ordemcerta
+
+x-app-env: &app-env
+  env_file: .env
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+      OC_OWNER_PASSWORD: ${OC_OWNER_PASSWORD}
+      OC_APP_PASSWORD: ${OC_APP_PASSWORD}
+      OC_SYSTEM_PASSWORD: ${OC_SYSTEM_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ordemcerta']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:?defina REDIS_PASSWORD}', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?defina MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defina MINIO_ROOT_PASSWORD}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  # Cria o bucket PRIVADO e o usuário de serviço da aplicação.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set oc http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing oc/$${S3_BUCKET} &&
+      mc anonymous set none oc/$${S3_BUCKET} &&
+      (mc admin user add oc $${S3_ACCESS_KEY_ID} $${S3_SECRET_ACCESS_KEY} || true) &&
+      (mc admin policy attach oc readwrite --user $${S3_ACCESS_KEY_ID} || true)"
+    env_file: .env
+    networks: [internal]
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    profiles: [antivirus]
+    networks: [internal]
+
+  # Job explícito e idempotente de migração (nunca prisma db push em produção).
+  migrate:
+    build: { context: ., dockerfile: infra/docker/node.Dockerfile, args: { APP: api } }
+    image: ordemcerta-api:${IMAGE_TAG:-latest}
+    <<: *app-env
+    working_dir: /app
+    command: ['sh', '-c', 'pnpm prisma migrate deploy && pnpm db:seed']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    networks: [internal]
+
+  api:
+    build: { context: ., dockerfile: infra/docker/node.Dockerfile, args: { APP: api } }
+    image: ordemcerta-api:${IMAGE_TAG:-latest}
+    <<: *app-env
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [internal, edge]
+
+  worker:
+    build: { context: ., dockerfile: infra/docker/node.Dockerfile, args: { APP: worker } }
+    image: ordemcerta-worker:${IMAGE_TAG:-latest}
+    <<: *app-env
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3002/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  web:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile }
+    image: ordemcerta-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks: [edge]
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+
+networks:
+  internal:
+    internal: true
+  edge: {}

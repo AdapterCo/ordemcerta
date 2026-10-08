@@ -1,0 +1,30 @@
+{
+  "name": "@ordemcerta/worker",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch --tsconfig tsconfig.json src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.3",
+    "@nestjs/core": "^11.1.3",
+    "@ordemcerta/server": "workspace:*",
+    "@ordemcerta/shared": "workspace:*",
+    "@prisma/client": "^6.16.0",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.6.1",
+    "pino": "^9.7.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

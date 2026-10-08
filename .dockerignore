@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.turbo
+.git
+.env
+.env.*
+!.env.example
+storage-local
+playwright-report
+test-results
+coverage

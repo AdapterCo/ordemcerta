@@ -1,0 +1,45 @@
+{
+  "name": "ordemcerta",
+  "private": true,
+  "version": "1.0.0",
+  "description": "OrdemCerta — SaaS de gestão de assistências técnicas",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:integration": "vitest run -c tests/vitest.integration.config.ts",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "@prisma/client": "^6.16.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.15.0",
+    "prisma": "^6.16.0",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.20.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "@ordemcerta/server": "workspace:*",
+    "@ordemcerta/shared": "workspace:*",
+    "@nestjs/common": "^11.1.3"
+  }
+}

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+    env:
+      DATABASE_MIGRATION_URL: postgresql://ordemcerta_owner:owner@localhost:5432/ordemcerta
+      DATABASE_URL: postgresql://ordemcerta_app:app@localhost:5432/ordemcerta
+      DATABASE_SYSTEM_URL: postgresql://ordemcerta_system:system@localhost:5432/ordemcerta
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-secret-ci-secret-ci-secret-ci-secret-0123
+      ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      NODE_ENV: test
+      APP_URL: http://localhost:5173
+      STORAGE_DRIVER: local
+      MAIL_TRANSPORT: console
+      COOKIE_SECURE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.13.1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Papéis do banco
+        env: { PGPASSWORD: postgres }
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE ordemcerta_owner LOGIN PASSWORD 'owner';" \
+            -c "CREATE ROLE ordemcerta_app LOGIN PASSWORD 'app' NOBYPASSRLS;" \
+            -c "CREATE ROLE ordemcerta_system LOGIN PASSWORD 'system' BYPASSRLS;" \
+            -c "CREATE DATABASE ordemcerta OWNER ordemcerta_owner;"
+      - run: pnpm prisma validate
+      - run: pnpm prisma generate
+      - run: pnpm build
+      - run: pnpm test
+      - name: Migrações do zero
+        run: pnpm prisma migrate deploy
+      - name: Seed idempotente (2x)
+        run: pnpm db:seed && pnpm db:seed
+      - name: Testes de integração (PostgreSQL real, RLS, concorrência, billing)
+        run: pnpm test:integration

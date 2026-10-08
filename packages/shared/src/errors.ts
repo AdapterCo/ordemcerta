@@ -1,0 +1,57 @@
+/** Códigos de erro uniformes da API: {code,message,details,requestId}. */
+export const ErrorCode = {
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  UNAUTHENTICATED: 'UNAUTHENTICATED',
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',
+  MFA_REQUIRED: 'MFA_REQUIRED',
+  MFA_INVALID: 'MFA_INVALID',
+  FORBIDDEN: 'FORBIDDEN',
+  CSRF_INVALID: 'CSRF_INVALID',
+  NOT_FOUND: 'NOT_FOUND',
+  CONFLICT: 'CONFLICT',
+  VERSION_CONFLICT: 'VERSION_CONFLICT',
+  INVALID_TRANSITION: 'INVALID_TRANSITION',
+  PRECONDITION_FAILED: 'PRECONDITION_FAILED',
+  PLAN_LIMIT_REACHED: 'PLAN_LIMIT_REACHED',
+  SUBSCRIPTION_INACTIVE: 'SUBSCRIPTION_INACTIVE',
+  IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
+  IDEMPOTENCY_CONFLICT: 'IDEMPOTENCY_CONFLICT',
+  INSUFFICIENT_STOCK: 'INSUFFICIENT_STOCK',
+  CASH_SESSION_REQUIRED: 'CASH_SESSION_REQUIRED',
+  CASH_SESSION_CONFLICT: 'CASH_SESSION_CONFLICT',
+  PAYMENT_EXCEEDS_BALANCE: 'PAYMENT_EXCEEDS_BALANCE',
+  DISCOUNT_NOT_ALLOWED: 'DISCOUNT_NOT_ALLOWED',
+  INTEGRATION_NOT_CONFIGURED: 'INTEGRATION_NOT_CONFIGURED',
+  PROVIDER_ERROR: 'PROVIDER_ERROR',
+  RATE_LIMITED: 'RATE_LIMITED',
+  TOKEN_INVALID: 'TOKEN_INVALID',
+  OTP_REQUIRED: 'OTP_REQUIRED',
+  OTP_INVALID: 'OTP_INVALID',
+  FILE_REJECTED: 'FILE_REJECTED',
+  STORAGE_UNAVAILABLE: 'STORAGE_UNAVAILABLE',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+export interface ApiErrorBody {
+  code: ErrorCode | string;
+  message: string;
+  details?: unknown;
+  requestId?: string;
+}
+
+export interface PlanLimitDetails {
+  kind: 'branches' | 'technicians_per_branch' | 'cash_registers_per_branch';
+  limit: number;
+  current: number;
+  plan: string;
+  branchId?: string;
+}
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

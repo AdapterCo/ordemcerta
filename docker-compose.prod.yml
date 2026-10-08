@@ -1,0 +1,43 @@
+# Override de produção: integra à rede EXTERNA do Traefik já existente (EasyPanel).
+# Não publica portas no host (PostgreSQL, Redis e MinIO ficam só na rede interna).
+# Não interfere nas portas 80/443/3000 do EasyPanel.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Antes: confirme rede/entrypoint/certresolver efetivos (ver infra/traefik/README.md).
+services:
+  api:
+    networks: [internal, traefik]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK}
+      - traefik.http.routers.oc-api.rule=Host(`${APP_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/health`))
+      - traefik.http.routers.oc-api.priority=100
+      - traefik.http.routers.oc-api.entrypoints=${TRAEFIK_ENTRYPOINT}
+      - traefik.http.routers.oc-api.tls=true
+      - traefik.http.routers.oc-api.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
+      - traefik.http.routers.oc-api.middlewares=oc-sec
+      - traefik.http.services.oc-api.loadbalancer.server.port=3001
+      - traefik.http.middlewares.oc-sec.headers.stsSeconds=31536000
+      - traefik.http.middlewares.oc-sec.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.oc-sec.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.oc-sec.headers.referrerPolicy=no-referrer
+
+  web:
+    networks: [traefik]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK}
+      - traefik.http.routers.oc-web.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.oc-web.priority=10
+      - traefik.http.routers.oc-web.entrypoints=${TRAEFIK_ENTRYPOINT}
+      - traefik.http.routers.oc-web.tls=true
+      - traefik.http.routers.oc-web.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
+      - traefik.http.services.oc-web.loadbalancer.server.port=80
+
+  worker:
+    deploy:
+      replicas: 1
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK}
