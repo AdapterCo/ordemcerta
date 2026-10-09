@@ -177,21 +177,27 @@ export class CashService {
 
   /** Suprimento/sangria serializados por lock na sessão (sangrias simultâneas não estouram o saldo). */
   movement(id: string, type: 'SUPPLY' | 'WITHDRAWAL', input: z.infer<typeof cashMovementSchema>, idempotencyKey: string) {
-    return this.db.run(async (tx) => {
-      const tenantId = currentTenantId();
-      await tx.$queryRaw`SELECT id FROM cash_sessions WHERE id = ${id}::uuid FOR UPDATE`;
-      const s = await this.loadSession(tx, id);
-      if (s.status !== 'OPEN') throw new DomainError(ErrorCode.CASH_SESSION_REQUIRED, 'Sessão de caixa fechada', 409);
-      if (type === 'WITHDRAWAL') {
-        const { expected } = await this.expected(tx, tenantId, id);
-        if (input.amountCents > expected.CASH) throw Errors.precondition('Sangria maior que o dinheiro disponível no caixa', { availableCents: expected.CASH });
-      }
-      const m = await tx.cashMovement.create({
-        data: { tenantId, cashSessionId: id, type, method: 'CASH', amountCents: input.amountCents, reason: input.reason, idempotencyKey, actorId: auth().userId },
-      });
-      await this.audit.log(tx, { action: type === 'SUPPLY' ? 'cash_supply' : 'cash_withdrawal', entity: 'cash_session', entityId: id, metadata: { amountCents: input.amountCents } });
-      return m;
+    return this.db.run((tx) => this.movementIn(tx, id, type, input, idempotencyKey));
+  }
+
+  /**
+   * Suprimento/sangria dentro de uma transação já aberta (usado também pela compra de
+   * peça paga com dinheiro do caixa). Mesmo lock, mesma checagem de saldo.
+   */
+  async movementIn(tx: Tx, id: string, type: 'SUPPLY' | 'WITHDRAWAL', input: z.infer<typeof cashMovementSchema>, idempotencyKey: string) {
+    const tenantId = currentTenantId();
+    await tx.$queryRaw`SELECT id FROM cash_sessions WHERE id = ${id}::uuid FOR UPDATE`;
+    const s = await this.loadSession(tx, id);
+    if (s.status !== 'OPEN') throw new DomainError(ErrorCode.CASH_SESSION_REQUIRED, 'Sessão de caixa fechada', 409);
+    if (type === 'WITHDRAWAL') {
+      const { expected } = await this.expected(tx, tenantId, id);
+      if (input.amountCents > expected.CASH) throw Errors.precondition('Sangria maior que o dinheiro disponível no caixa', { availableCents: expected.CASH });
+    }
+    const m = await tx.cashMovement.create({
+      data: { tenantId, cashSessionId: id, type, method: 'CASH', amountCents: input.amountCents, reason: input.reason, idempotencyKey, actorId: auth().userId },
     });
+    await this.audit.log(tx, { action: type === 'SUPPLY' ? 'cash_supply' : 'cash_withdrawal', entity: 'cash_session', entityId: id, metadata: { amountCents: input.amountCents } });
+    return m;
   }
 
   /**

@@ -1071,6 +1071,7 @@ model ServiceOrder {
   quotes         Quote[]
   warrantyClaims WarrantyClaim[]
   pickupReceipt  PickupReceipt?
+  partPurchases  OrderPartPurchase[]
   trackingTokens PublicTrackingToken[]
   otps           PublicOtp[]
   reservations   StockReservation[]
@@ -1167,6 +1168,47 @@ model ServiceOrderFile {
   @@unique([tenantId, id])
   @@index([tenantId, orderId])
   @@map("service_order_files")
+}
+
+/// Como a loja pagou a peça comprada para o serviço.
+enum PartPaymentMethod {
+  CASH_REGISTER
+  CASH_OTHER
+  PIX
+  DEBIT_CARD
+  CREDIT_CARD
+  BANK_SLIP
+  ON_CREDIT
+  OTHER
+}
+
+/// Peça comprada especificamente para uma OS (fora do estoque): custo, fornecedor e forma de pagamento.
+/// Custo vira COGS da OS no razão; pago com dinheiro do caixa gera sangria vinculada.
+model OrderPartPurchase {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  orderId        String            @map("order_id") @db.Uuid
+  branchId       String            @map("branch_id") @db.Uuid
+  description    String            @db.VarChar(200)
+  qty            Int
+  unitCostCents  Int               @map("unit_cost_cents")
+  totalCostCents Int               @map("total_cost_cents")
+  supplierName   String?           @map("supplier_name") @db.VarChar(120)
+  paymentMethod  PartPaymentMethod @map("payment_method")
+  cashMovementId String?           @map("cash_movement_id") @db.Uuid
+  purchasedAt    DateTime          @map("purchased_at") @db.Timestamptz(3)
+  notes          String?           @db.VarChar(500)
+  createdBy      String            @map("created_by") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  canceledAt     DateTime?         @map("canceled_at") @db.Timestamptz(3)
+  canceledBy     String?           @map("canceled_by") @db.Uuid
+  cancelReason   String?           @map("cancel_reason") @db.VarChar(300)
+
+  order ServiceOrder @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, orderId])
+  @@map("order_part_purchases")
 }
 
 model ServiceOrderTerm {

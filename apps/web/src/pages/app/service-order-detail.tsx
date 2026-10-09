@@ -1,5 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { ORDER_EVENT_LABELS, PAYMENT_METHODS, QUOTE_LINE_KINDS, lineTotalCents, statusLabel, type Permission, type TechnicalStatus } from '@ordemcerta/shared';
+import {
+  ORDER_EVENT_LABELS,
+  PART_PAYMENT_METHOD_LABELS,
+  PART_PAYMENT_METHODS,
+  PAYMENT_METHODS,
+  QUOTE_LINE_KINDS,
+  lineTotalCents,
+  statusLabel,
+  type Permission,
+  type TechnicalStatus,
+} from '@ordemcerta/shared';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -405,6 +415,167 @@ function QuoteTab({ o }: { o: Order }) {
 
 /* ----------------------------------------------------------------- peças */
 
+const emptyPurchase = { description: '', qty: 1, unitCostCents: 0, supplierName: '', paymentMethod: 'PIX', cashSessionId: '', notes: '' };
+
+/** Peças compradas no ato do serviço (fora do estoque): custo, fornecedor e como foram pagas. */
+function PartPurchases({ o }: { o: Order }) {
+  const { can } = useAuth();
+  const [form, setForm] = useState(emptyPurchase);
+  const [cancel, setCancel] = useState<any | null>(null);
+  const [reason, setReason] = useState('');
+  const sessions = useApi<Array<{ id: string; branchId: string; register: { name: string } }>>(['cash-current'], can('cash:operate') ? '/cash-sessions/current' : null);
+  const branchSessions = sessions.data?.filter((s) => s.branchId === o.branchId) ?? [];
+  useEffect(() => {
+    if (form.paymentMethod === 'CASH_REGISTER' && !form.cashSessionId && branchSessions[0]) setForm((f) => ({ ...f, cashSessionId: branchSessions[0]!.id }));
+  }, [form.paymentMethod, form.cashSessionId, branchSessions]);
+  const inv = [['os', o.id], ['os-history', o.id]] as const;
+  const save = useAction(
+    (_: void, key) =>
+      api(`/service-orders/${o.id}/part-purchases`, {
+        method: 'POST',
+        idempotencyKey: key,
+        body: {
+          ...form,
+          supplierName: form.supplierName || null,
+          notes: form.notes || null,
+          cashSessionId: form.paymentMethod === 'CASH_REGISTER' ? form.cashSessionId : undefined,
+        },
+      }),
+    { success: 'Compra de peça registrada', invalidate: [...inv, ['cash-current']], onSuccess: () => setForm(emptyPurchase) },
+  );
+  const doCancel = useAction((_: void) => api(`/service-orders/${o.id}/part-purchases/${cancel.id}/cancel`, { method: 'POST', body: { reason } }), {
+    success: 'Compra cancelada',
+    invalidate: [...inv],
+    onSuccess: () => {
+      setCancel(null);
+      setReason('');
+    },
+  });
+  const active = (o.partPurchases ?? []).filter((p: any) => !p.canceledAt);
+  const totalCost = active.reduce((s: number, p: any) => s + p.totalCostCents, 0);
+  const total = form.qty * form.unitCostCents;
+  const needsCash = form.paymentMethod === 'CASH_REGISTER';
+  const canSave = form.description.trim().length > 0 && (!needsCash || (form.cashSessionId && total > 0));
+
+  return (
+    <>
+      <Card title="Peças compradas para este serviço" actions={active.length > 0 && <span className="text-sm">Custo total: <strong>{formatBRL(totalCost)}</strong></span>}>
+        {!o.partPurchases?.length ? (
+          <p className="text-sm text-slate-500">Nenhuma peça comprada registrada. Registre aqui as peças compradas especificamente para este serviço (fora do estoque).</p>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Peça</Th>
+                <Th>Qtd</Th>
+                <Th>Custo unit.</Th>
+                <Th>Custo total</Th>
+                <Th>Fornecedor</Th>
+                <Th>Pagamento</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {o.partPurchases.map((p: any) => (
+                <tr key={p.id} className={p.canceledAt ? 'text-slate-400 line-through' : undefined}>
+                  <Td>
+                    {p.description}
+                    <span className="block text-xs text-slate-500 no-underline">{formatDateBR(p.purchasedAt)}</span>
+                  </Td>
+                  <Td>{p.qty}</Td>
+                  <Td>{formatBRL(p.unitCostCents)}</Td>
+                  <Td>{formatBRL(p.totalCostCents)}</Td>
+                  <Td>{p.supplierName ?? '—'}</Td>
+                  <Td className="text-xs">{PART_PAYMENT_METHOD_LABELS[p.paymentMethod as keyof typeof PART_PAYMENT_METHOD_LABELS]}</Td>
+                  <Td>
+                    {p.canceledAt ? (
+                      <Badge tone="gray">Cancelada</Badge>
+                    ) : (
+                      can('os:repair') && (
+                        <Button size="sm" variant="ghost" onClick={() => setCancel(p)}>
+                          Cancelar
+                        </Button>
+                      )
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+      {can('os:repair') && o.technicalStatus !== 'CANCELED' && (
+        <Card title="Registrar peça comprada">
+          <div className="grid gap-3 sm:grid-cols-6">
+            <Field label="Peça" htmlFor="pp-d" className="sm:col-span-3">
+              <Input id="pp-d" placeholder="Ex.: Tela iPhone 13 incell" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </Field>
+            <Field label="Quantidade" htmlFor="pp-q">
+              <Input id="pp-q" type="number" min={1} value={form.qty} onChange={(e) => setForm({ ...form, qty: Math.max(1, Number(e.target.value)) })} />
+            </Field>
+            <Field label="Custo unitário" htmlFor="pp-c" className="sm:col-span-2">
+              <MoneyInput id="pp-c" value={form.unitCostCents} onChange={(v) => setForm({ ...form, unitCostCents: v })} />
+            </Field>
+            <Field label="Fornecedor (opcional)" htmlFor="pp-s" className="sm:col-span-2">
+              <Input id="pp-s" placeholder="Ex.: Distribuidora X" value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} />
+            </Field>
+            <Field label="Como a loja pagou" htmlFor="pp-m" className="sm:col-span-2">
+              <Select id="pp-m" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value, cashSessionId: '' })}>
+                {PART_PAYMENT_METHODS.filter((m) => m !== 'CASH_REGISTER' || can('cash:operate')).map((m) => (
+                  <option key={m} value={m}>
+                    {PART_PAYMENT_METHOD_LABELS[m]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {needsCash && (
+              <Field label="Caixa de onde saiu o dinheiro" htmlFor="pp-cx" className="sm:col-span-2">
+                {branchSessions.length ? (
+                  <Select id="pp-cx" value={form.cashSessionId} onChange={(e) => setForm({ ...form, cashSessionId: e.target.value })}>
+                    {branchSessions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.register.name}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <p className="text-sm text-amber-700">
+                    Nenhum caixa aberto nesta filial. <Link className="underline" to="/app/cash">Abrir caixa</Link>
+                  </p>
+                )}
+              </Field>
+            )}
+            <Field label="Observação (opcional)" htmlFor="pp-n" className="sm:col-span-6">
+              <Input id="pp-n" placeholder="Ex.: nota fiscal 1234, garantia do fornecedor 90 dias" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            </Field>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm">
+              Custo desta compra: <strong>{formatBRL(total)}</strong>
+              {needsCash && total > 0 && <span className="ml-2 text-xs text-amber-700">será registrada uma sangria de {formatBRL(total)} no caixa</span>}
+            </span>
+            <Button loading={save.isPending} disabled={!canSave} onClick={() => save.mutate()}>
+              Registrar compra
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">O custo entra na margem desta OS nos relatórios. O preço cobrado do cliente é definido no orçamento.</p>
+        </Card>
+      )}
+      <ConfirmDialog
+        open={Boolean(cancel)}
+        onOpenChange={() => setCancel(null)}
+        title={`Cancelar compra: ${cancel?.description ?? ''}`}
+        description={cancel?.cashMovementId ? 'O valor volta para o caixa (suprimento) se ele ainda estiver aberto.' : 'O custo sai da margem da OS.'}
+        danger
+        loading={doCancel.isPending}
+        onConfirm={() => doCancel.mutate()}
+      >
+        <Textarea aria-label="Motivo" placeholder="Motivo do cancelamento (mín. 5 caracteres)" value={reason} onChange={(e) => setReason(e.target.value)} />
+      </ConfirmDialog>
+    </>
+  );
+}
+
 function PartsTab({ o }: { o: Order }) {
   const { can } = useAuth();
   const [term, setTerm] = useState('');
@@ -416,6 +587,8 @@ function PartsTab({ o }: { o: Order }) {
   const release = useAction((reservationId: string, key) => api('/stock/release', { method: 'POST', idempotencyKey: key, body: { reservationId } }), { success: 'Reserva liberada', invalidate: [...inv] });
   return (
     <div className="space-y-4">
+      <PartPurchases o={o} />
+      <h3 className="pt-2 text-sm font-semibold text-slate-700">Peças do estoque</h3>
       <Table>
         <thead>
           <tr>

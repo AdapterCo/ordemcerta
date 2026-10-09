@@ -206,6 +206,48 @@ describe('cadastro direto de funcionário', () => {
   });
 });
 
+describe('peça comprada para a OS', () => {
+  it('dinheiro do caixa gera sangria e custo; sem saldo é recusada; cancelamento devolve ao caixa', async () => {
+    const F = await makeTenant('Compra peça');
+    const h = await new Http(base).login(F.ownerEmail);
+    const session = (await h.req('POST', '/cash-sessions/open', { registerId: F.registerId, openingFloatCents: 10000 }, { 'Idempotency-Key': idem() })).body.id;
+    const c = await h.req('POST', '/customers', { name: 'João', phone: '11944443333' });
+    const created = await h.req('POST', '/service-orders', { branchId: F.branchId, customerId: c.body.id, device: { brand: 'Apple', model: 'iPhone 13' }, reportedIssue: 'Tela quebrada' }, { 'Idempotency-Key': idem() });
+    const id = created.body.order.id as string;
+    const buy = (body: Record<string, unknown>) => h.req<any>('POST', `/service-orders/${id}/part-purchases`, body, { 'Idempotency-Key': idem() });
+    const cogs = async () =>
+      (await system.financialLedger.aggregate({ where: { tenantId: F.tenantId, sourceType: 'SERVICE_ORDER', sourceId: id, entryType: 'COGS' }, _sum: { amountCents: true } }))._sum.amountCents ?? 0;
+    const cashInDrawer = async () => (await h.req<any>('GET', `/cash-sessions/${session}/summary`)).body.expected.CASH as number;
+
+    // mais do que há no caixa: recusada, nada é gravado
+    expect((await buy({ description: 'Tela', qty: 1, unitCostCents: 20000, paymentMethod: 'CASH_REGISTER', cashSessionId: session })).status).toBe(422);
+    expect(await cogs()).toBe(0);
+
+    const p = await buy({ description: 'Tela incell', qty: 2, unitCostCents: 3000, supplierName: 'Distribuidora', paymentMethod: 'CASH_REGISTER', cashSessionId: session });
+    expect(p.status).toBe(201);
+    expect(p.body.totalCostCents).toBe(6000);
+    expect(p.body.cashMovementId).toBeTruthy();
+    expect(await cashInDrawer()).toBe(4000);
+
+    const pix = await buy({ description: 'Conector de carga', qty: 1, unitCostCents: 1500, paymentMethod: 'PIX' });
+    expect(pix.status).toBe(201);
+    expect(pix.body.cashMovementId).toBeNull();
+    expect(await cashInDrawer()).toBe(4000);
+    expect(await cogs()).toBe(7500);
+    expect((await h.req<any>('GET', `/service-orders/${id}`)).body.partPurchases).toHaveLength(2);
+
+    // cancelamento: devolve ao caixa (aberto) e estorna o custo; não cancela duas vezes
+    expect((await h.req('POST', `/service-orders/${id}/part-purchases/${p.body.id}/cancel`, { reason: 'abc' })).status).toBe(422);
+    expect((await h.req('POST', `/service-orders/${id}/part-purchases/${p.body.id}/cancel`, { reason: 'Peça errada, devolvida' })).status).toBe(200);
+    expect(await cashInDrawer()).toBe(10000);
+    expect(await cogs()).toBe(1500);
+    expect((await h.req('POST', `/service-orders/${id}/part-purchases/${p.body.id}/cancel`, { reason: 'De novo, por engano' })).status).toBe(409);
+
+    const hist = await h.req<any[]>('GET', `/service-orders/${id}/history`);
+    expect(hist.body.map((e) => e.eventType)).toEqual(expect.arrayContaining(['part_purchased', 'part_purchase_canceled']));
+  });
+});
+
 describe('fluxo completo da OS', () => {
   it('recepção → diagnóstico → orçamento → aprovação → reparo → baixa de peça → conclusão → pagamento → entrega → PDF', async () => {
     const F = await makeTenant('Fluxo');

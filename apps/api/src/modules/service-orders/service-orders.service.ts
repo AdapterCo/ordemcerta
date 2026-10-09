@@ -255,6 +255,7 @@ export class ServiceOrdersService {
           terms: { orderBy: { acceptedAt: 'desc' } },
           quotes: { include: { lines: { orderBy: { position: 'asc' } } }, orderBy: { version: 'desc' } },
           reservations: { include: { product: { select: { name: true, sku: true } } }, orderBy: { createdAt: 'desc' } },
+          partPurchases: { orderBy: { purchasedAt: 'desc' } },
           pickupReceipt: true,
           warrantyClaims: true,
           unlockSecrets: { where: { purgedAt: null, expiresAt: { gt: new Date() } }, select: { id: true, expiresAt: true } },

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, 
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   assignSchema,
+  cancelPartPurchaseSchema,
   cancelSchema,
   checklistSchema,
   completeRepairSchema,
@@ -9,6 +10,7 @@ import {
   deliverSchema,
   intakeSignatureSchema,
   noteSchema,
+  partPurchaseSchema,
   reopenSchema,
   serviceOrderQuerySchema,
   submitDiagnosisSchema,
@@ -21,6 +23,7 @@ import { z } from 'zod';
 import { Idempotent, Operational, Perm } from '../../core/decorators';
 import { Doc, ZBody, ZQuery } from '../../core/zod';
 import { OrderDocumentsService } from './order-documents.service';
+import { OrderPartsService } from './order-parts.service';
 import { ServiceOrdersService } from './service-orders.service';
 
 const reasonSchema = z.object({ reason: z.string().trim().min(5).max(300) });
@@ -33,6 +36,7 @@ export class ServiceOrdersController {
   constructor(
     private readonly orders: ServiceOrdersService,
     private readonly docs: OrderDocumentsService,
+    private readonly parts: OrderPartsService,
   ) {}
 
   @Get()
@@ -227,6 +231,27 @@ export class ServiceOrdersController {
   @Doc('Adiciona nota (interna ou visível ao cliente)', { body: noteSchema })
   note(@Param('id', ParseUUIDPipe) id: string, @ZBody(noteSchema) body: z.infer<typeof noteSchema>) {
     return this.orders.addNote(id, body);
+  }
+
+  @Post(':id/part-purchases')
+  @Perm('os:repair')
+  @Operational()
+  @Idempotent()
+  @Doc('Registra peça comprada para a OS (custo, fornecedor, forma de pagamento; dinheiro do caixa gera sangria)', { body: partPurchaseSchema })
+  purchasePart(@Param('id', ParseUUIDPipe) id: string, @ZBody(partPurchaseSchema) body: z.infer<typeof partPurchaseSchema>) {
+    return this.parts.create(id, body);
+  }
+
+  @Post(':id/part-purchases/:purchaseId/cancel')
+  @Perm('os:repair')
+  @HttpCode(200)
+  @Doc('Cancela compra de peça (estorna custo e, se pago pelo caixa, devolve ao caixa aberto)', { body: cancelPartPurchaseSchema })
+  cancelPartPurchase(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('purchaseId', ParseUUIDPipe) purchaseId: string,
+    @ZBody(cancelPartPurchaseSchema) body: z.infer<typeof cancelPartPurchaseSchema>,
+  ) {
+    return this.parts.cancel(id, purchaseId, body);
   }
 
   @Post(':id/checklists')

@@ -234,6 +234,30 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   OTHER: 'Outro',
 };
 
+/** Como a loja pagou uma peça comprada para o serviço (fora do estoque). */
+export const PartPaymentMethod = {
+  CASH_REGISTER: 'CASH_REGISTER',
+  CASH_OTHER: 'CASH_OTHER',
+  PIX: 'PIX',
+  DEBIT_CARD: 'DEBIT_CARD',
+  CREDIT_CARD: 'CREDIT_CARD',
+  BANK_SLIP: 'BANK_SLIP',
+  ON_CREDIT: 'ON_CREDIT',
+  OTHER: 'OTHER',
+} as const;
+export type PartPaymentMethod = (typeof PartPaymentMethod)[keyof typeof PartPaymentMethod];
+export const PART_PAYMENT_METHODS = values(PartPaymentMethod);
+export const PART_PAYMENT_METHOD_LABELS: Record<PartPaymentMethod, string> = {
+  CASH_REGISTER: 'Dinheiro do caixa (registra sangria)',
+  CASH_OTHER: 'Dinheiro (fora do caixa)',
+  PIX: 'Pix',
+  DEBIT_CARD: 'Cartão de débito',
+  CREDIT_CARD: 'Cartão de crédito',
+  BANK_SLIP: 'Boleto',
+  ON_CREDIT: 'A prazo com o fornecedor',
+  OTHER: 'Outro',
+};
+
 export const StockMovementType = {
   RECEIPT: 'RECEIPT',
   SALE: 'SALE',

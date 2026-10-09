@@ -3,6 +3,7 @@ import {
   ACCESSORY_TYPES,
   DOCUMENT_TEMPLATE_TYPES,
   MESSAGING_EVENT_TYPES,
+  PART_PAYMENT_METHODS,
   PAYMENT_METHODS,
   PRIORITIES,
   PRODUCT_KINDS,
@@ -517,6 +518,28 @@ export const refundPaymentSchema = z.object({ amountCents: positiveCents, reason
 export const cashRegisterSchema = z.object({ branchId: uuid, name: trimmed(60) });
 export const openCashSchema = z.object({ registerId: uuid, openingFloatCents: cents });
 export const cashMovementSchema = z.object({ amountCents: positiveCents, reason: trimmed(300) });
+
+/** Peça comprada para a OS (fora do estoque). Dinheiro do caixa exige a sessão de caixa aberta. */
+export const partPurchaseSchema = z
+  .object({
+    description: trimmed(200),
+    qty: z.number().int().min(1).max(999),
+    unitCostCents: cents,
+    supplierName: optionalText(120),
+    paymentMethod: z.enum(PART_PAYMENT_METHODS),
+    cashSessionId: uuid.optional(),
+    purchasedAt: z.coerce.date().optional(),
+    notes: optionalText(500),
+  })
+  .refine((v) => v.paymentMethod !== 'CASH_REGISTER' || Boolean(v.cashSessionId), {
+    message: 'Selecione o caixa de onde saiu o dinheiro',
+    path: ['cashSessionId'],
+  })
+  .refine((v) => v.paymentMethod !== 'CASH_REGISTER' || v.qty * v.unitCostCents > 0, {
+    message: 'Informe o custo para registrar a saída do caixa',
+    path: ['unitCostCents'],
+  });
+export const cancelPartPurchaseSchema = z.object({ reason: z.string().trim().min(5).max(300) });
 export const closeCashSchema = z.object({
   declared: z.record(z.enum(PAYMENT_METHODS), cents),
   notes: optionalText(1000),
