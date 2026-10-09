@@ -21,11 +21,36 @@ const prisma = new PrismaClient({ datasourceUrl: url });
 
 const ARGON = { memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
 
+/**
+ * Preço do plano pelo .env (PLAN_PRICE_<CODIGO>, em reais: "29,99" ou "29.99").
+ * Vazio = preço padrão (17.1). Assinaturas existentes mantêm o preço travado; o novo
+ * preço vale para novas assinaturas.
+ */
+function envPriceCents(code: string): number | null {
+  const raw = process.env[`PLAN_PRICE_${code}`]?.trim();
+  if (!raw) return null;
+  // "1.299,90" / "29,99" (formato BR) ou "29.99"
+  const n = Number(raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw);
+  if (!Number.isFinite(n) || n <= 0 || n > 100_000) throw new Error(`PLAN_PRICE_${code} inválido: "${raw}" (use reais, ex.: 29,99)`);
+  return Math.round(n * 100);
+}
+
 async function seedPlans() {
-  for (const p of PLAN_SEED) {
+  for (const base of PLAN_SEED) {
+    const wanted = envPriceCents(base.code);
+    const p = { ...base, priceCents: wanted ?? base.priceCents };
     const existing = await prisma.plan.findUnique({ where: { code: p.code } });
     if (existing) {
-      console.log(`plano ${p.code} já existe (preço preservado: ${existing.priceCents})`);
+      if (wanted !== null && wanted !== existing.priceCents) {
+        const version = existing.priceVersion + 1;
+        await prisma.$transaction([
+          prisma.plan.update({ where: { id: existing.id }, data: { priceCents: wanted, priceVersion: version } }),
+          prisma.planPriceHistory.create({ data: { planId: existing.id, version, priceCents: wanted, effectiveAt: new Date() } }),
+        ]);
+        console.log(`plano ${p.code}: preço ${existing.priceCents} → ${wanted} centavos (PLAN_PRICE_${p.code})`);
+      } else {
+        console.log(`plano ${p.code} já existe (preço: ${existing.priceCents} centavos)`);
+      }
       continue;
     }
     await prisma.$transaction(async (tx) => {
