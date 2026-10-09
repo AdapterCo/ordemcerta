@@ -71,6 +71,48 @@
         ]
       }
     },
+    "/api/v1/auth/first-password": {
+      "post": {
+        "operationId": "AuthController_firstPassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mfaToken": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 2000
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "mfaToken",
+                  "newPassword"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Troca obrigatória da senha provisória (cadastro feito pelo dono/administrador)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/mfa/verify": {
       "post": {
         "operationId": "AuthController_mfaVerify",
@@ -548,89 +590,6 @@
           }
         ],
         "summary": "Revoga uma sessão",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/api/v1/auth/invitations/preview": {
-      "post": {
-        "operationId": "AuthController_previewInvitation",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "token": {
-                    "type": "string",
-                    "minLength": 20,
-                    "maxLength": 200
-                  }
-                },
-                "required": [
-                  "token"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "summary": "Dados públicos do convite",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/api/v1/auth/invitations/accept": {
-      "post": {
-        "operationId": "AuthController_acceptInvitation",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "token": {
-                    "type": "string",
-                    "minLength": 20,
-                    "maxLength": 200
-                  },
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 120
-                  },
-                  "password": {
-                    "type": "string",
-                    "minLength": 10,
-                    "maxLength": 128
-                  }
-                },
-                "required": [
-                  "token",
-                  "name"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "summary": "Aceita convite (cria acesso se necessário)",
         "tags": [
           "auth"
         ]
@@ -1220,7 +1179,7 @@
             "bearer": []
           }
         ],
-        "summary": "Membros e convites pendentes",
+        "summary": "Membros da empresa",
         "tags": [
           "tenant"
         ]
@@ -1235,10 +1194,20 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
                   "email": {
                     "type": "string",
                     "format": "email",
                     "maxLength": 254
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 128
                   },
                   "role": {
                     "type": "string",
@@ -1272,6 +1241,7 @@
                   }
                 },
                 "required": [
+                  "name",
                   "email",
                   "role"
                 ],
@@ -1290,7 +1260,7 @@
             "bearer": []
           }
         ],
-        "summary": "Convida membro (alias de /members/invite)",
+        "summary": "Cadastra funcionário com senha provisória (troca obrigatória no primeiro login)",
         "tags": [
           "tenant"
         ]
@@ -1325,81 +1295,9 @@
         ]
       }
     },
-    "/api/v1/members/invite": {
+    "/api/v1/members/{id}/reset-password": {
       "post": {
-        "operationId": "TenantsController_invite",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "email": {
-                    "type": "string",
-                    "format": "email",
-                    "maxLength": 254
-                  },
-                  "role": {
-                    "type": "string",
-                    "enum": [
-                      "TENANT_OWNER",
-                      "TENANT_ADMIN",
-                      "MANAGER",
-                      "RECEPTIONIST",
-                      "TECHNICIAN",
-                      "CASHIER",
-                      "INVENTORY"
-                    ]
-                  },
-                  "branchIds": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "maxItems": 50,
-                    "default": []
-                  },
-                  "technicianBranchIds": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "maxItems": 50,
-                    "default": []
-                  }
-                },
-                "required": [
-                  "email",
-                  "role"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Convida membro por e-mail (expira em 7 dias)",
-        "tags": [
-          "tenant"
-        ]
-      }
-    },
-    "/api/v1/members/invitations/{id}": {
-      "delete": {
-        "operationId": "TenantsController_revokeInvitation",
+        "operationId": "TenantsController_resetMemberPassword",
         "parameters": [
           {
             "name": "id",
@@ -1410,8 +1308,26 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 128
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "204": {
+          "200": {
             "description": ""
           }
         },
@@ -1420,7 +1336,7 @@
             "bearer": []
           }
         ],
-        "summary": "Revoga convite",
+        "summary": "Redefine a senha do funcionário (nova senha provisória)",
         "tags": [
           "tenant"
         ]

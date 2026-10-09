@@ -26,7 +26,8 @@ export interface Me {
   };
 }
 
-export type LoginOutcome = { status: 'authenticated' } | { status: 'mfa_required' | 'mfa_setup_required'; mfaToken: string };
+export type LoginStep = 'mfa_required' | 'mfa_setup_required' | 'password_change_required';
+export type LoginOutcome = { status: 'authenticated' } | { status: LoginStep; mfaToken: string };
 
 interface AuthState {
   me: Me | null;
@@ -109,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await completeSession(r.accessToken);
         return { status: 'authenticated' };
       }
-      return { status: r.status as 'mfa_required' | 'mfa_setup_required', mfaToken: r.mfaToken! };
+      return { status: r.status as LoginStep, mfaToken: r.mfaToken! };
     },
     [completeSession],
   );

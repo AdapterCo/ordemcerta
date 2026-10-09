@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { forgotPasswordSchema, loginSchema, passwordSchema } from '@ordemcerta/shared';
 import QRCode from 'qrcode';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
@@ -9,12 +9,16 @@ import { z } from 'zod';
 import { PublicLayout } from '@/components/layout';
 import { Alert, Button, Card, Field, Input } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
+import { useAuth, type LoginStep } from '@/lib/auth';
 import { fragmentParam } from '@/lib/utils';
 
 function safeNext(next: string | null) {
   return next && next.startsWith('/') && !next.startsWith('//') ? next : null;
 }
+
+const newPasswordForm = z
+  .object({ password: passwordSchema, confirm: z.string() })
+  .refine((v) => v.password === v.confirm, { message: 'As senhas não conferem', path: ['confirm'] });
 
 export function LoginPage() {
   const { login, completeSession, me } = useAuth();
@@ -23,6 +27,8 @@ export function LoginPage() {
   const [mfa, setMfa] = useState<{ token: string; setup: boolean } | null>(null);
   const [setupQr, setSetupQr] = useState<{ img: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
+  const [pwToken, setPwToken] = useState<string | null>(null);
+  const pwForm = useForm<z.infer<typeof newPasswordForm>>({ resolver: zodResolver(newPasswordForm) });
   const [busy, setBusy] = useState(false);
   const form = useForm<z.infer<typeof loginSchema>>({ resolver: zodResolver(loginSchema) });
 
@@ -31,18 +37,45 @@ export function LoginPage() {
     navigate(next ?? '/app/dashboard', { replace: true });
   };
 
-  if (me && !mfa) return <Navigate to={me.user.platformRole && !me.current ? '/platform/dashboard' : (safeNext(params.get('next')) ?? '/app/dashboard')} replace />;
+  if (me && !mfa && !pwToken) return <Navigate to={me.user.platformRole && !me.current ? '/platform/dashboard' : (safeNext(params.get('next')) ?? '/app/dashboard')} replace />;
 
   const submit = form.handleSubmit(async (v) => {
     setBusy(true);
     try {
       const r = await login(v.email, v.password);
       if (r.status === 'authenticated') return go();
-      setMfa({ token: r.mfaToken, setup: r.status === 'mfa_setup_required' });
-      if (r.status === 'mfa_setup_required') {
-        const s = await api<{ otpauthUrl: string; secret: string }>('/auth/mfa/setup-required/start', { method: 'POST', body: { mfaToken: r.mfaToken } });
-        setSetupQr({ img: await QRCode.toDataURL(s.otpauthUrl), secret: s.secret });
+      await nextStep(r.status, r.mfaToken);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  /** Etapas após a senha: troca obrigatória da senha provisória ou MFA. */
+  const nextStep = async (status: LoginStep, token: string) => {
+    if (status === 'password_change_required') return setPwToken(token);
+    setPwToken(null);
+    setMfa({ token, setup: status === 'mfa_setup_required' });
+    if (status === 'mfa_setup_required') {
+      const s = await api<{ otpauthUrl: string; secret: string }>('/auth/mfa/setup-required/start', { method: 'POST', body: { mfaToken: token } });
+      setSetupQr({ img: await QRCode.toDataURL(s.otpauthUrl), secret: s.secret });
+    }
+  };
+
+  const changeProvisional = pwForm.handleSubmit(async (v) => {
+    setBusy(true);
+    try {
+      const r = await api<{ status: string; accessToken?: string; mfaToken?: string }>('/auth/first-password', {
+        method: 'POST',
+        body: { mfaToken: pwToken, newPassword: v.password },
+      });
+      if (r.status === 'authenticated' && r.accessToken) {
+        await completeSession(r.accessToken);
+        toast.success('Senha definida. Bem-vindo!');
+        return go();
       }
+      await nextStep(r.status as LoginStep, r.mfaToken!);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -67,8 +100,23 @@ export function LoginPage() {
   return (
     <PublicLayout>
       <div className="mx-auto max-w-sm py-8">
-        <Card title={mfa ? 'Verificação em duas etapas' : 'Entrar'}>
-          {!mfa ? (
+        <Card title={pwToken ? 'Defina sua senha' : mfa ? 'Verificação em duas etapas' : 'Entrar'}>
+          {pwToken ? (
+            <form onSubmit={changeProvisional} className="space-y-4" noValidate>
+              <Alert tone="blue" title="Primeiro acesso">
+                Você entrou com uma senha provisória. Crie agora a sua senha pessoal para continuar.
+              </Alert>
+              <Field label="Nova senha" htmlFor="newpw" error={pwForm.formState.errors.password?.message} hint="Mínimo de 10 caracteres, com letras e números">
+                <Input id="newpw" type="password" autoComplete="new-password" autoFocus {...pwForm.register('password')} />
+              </Field>
+              <Field label="Confirmar senha" htmlFor="newpw2" error={pwForm.formState.errors.confirm?.message}>
+                <Input id="newpw2" type="password" autoComplete="new-password" {...pwForm.register('confirm')} />
+              </Field>
+              <Button type="submit" className="w-full" loading={busy}>
+                Salvar e entrar
+              </Button>
+            </form>
+          ) : !mfa ? (
             <form onSubmit={submit} className="space-y-4" noValidate>
               <Field label="E-mail" htmlFor="email" error={form.formState.errors.email?.message}>
                 <Input id="email" type="email" autoComplete="username" {...form.register('email')} />
@@ -181,65 +229,6 @@ export function ResetPasswordPage() {
                 Salvar
               </Button>
             </form>
-          )}
-        </Card>
-      </div>
-    </PublicLayout>
-  );
-}
-
-export function InvitePage() {
-  const token = fragmentParam('token');
-  const { completeSession } = useAuth();
-  const navigate = useNavigate();
-  const [info, setInfo] = useState<{ tenantName: string; email: string; roleLabel: string; userExists: boolean } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!token) return setError('Convite inválido');
-    api<typeof info>('/auth/invitations/preview', { method: 'POST', body: { token } })
-      .then(setInfo)
-      .catch((e) => setError(errorMessage(e)));
-  }, [token]);
-
-  const accept = async () => {
-    setBusy(true);
-    try {
-      const r = await api<{ accessToken: string }>('/auth/invitations/accept', { method: 'POST', body: { token, name, password: info?.userExists ? undefined : password } });
-      await completeSession(r.accessToken);
-      navigate('/app/dashboard');
-    } catch (e) {
-      toast.error(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <PublicLayout>
-      <div className="mx-auto max-w-sm py-8">
-        <Card title="Convite">
-          {error && <Alert tone="red">{error}</Alert>}
-          {info && (
-            <div className="space-y-4">
-              <p className="text-sm">
-                Você foi convidado para <strong>{info.tenantName}</strong> como <strong>{info.roleLabel}</strong> ({info.email}).
-              </p>
-              <Field label="Seu nome" htmlFor="name">
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
-              </Field>
-              {!info.userExists && (
-                <Field label="Crie uma senha" htmlFor="pw" hint="Mínimo de 10 caracteres, com letras e números">
-                  <Input id="pw" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </Field>
-              )}
-              <Button className="w-full" loading={busy} disabled={!name || (!info.userExists && password.length < 10)} onClick={accept}>
-                Aceitar convite
-              </Button>
-            </div>
           )}
         </Card>
       </div>

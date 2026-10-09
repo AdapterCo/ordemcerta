@@ -1,13 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { hash, verify } from '@node-rs/argon2';
-import { randomToken, sha256Hex, emailTemplate, type Tx } from '@ordemcerta/server';
-import { ErrorCode, isOperational, permissionsForRole, ROLE_LABELS, type TenantRole } from '@ordemcerta/shared';
+import { randomToken, sha256Hex, emailTemplate } from '@ordemcerta/server';
+import { ErrorCode, isOperational, permissionsForRole, type TenantRole } from '@ordemcerta/shared';
 import { authenticator } from 'otplib';
 import { auth as authCtx, maybeCtx } from '../../core/context';
 import { SystemPrisma } from '../../core/database';
 import { ENV, type AppEnv } from '../../core/env.provider';
 import { DomainError, Errors } from '../../core/errors';
-import { PlanLimitsService } from '../../core/plan-limits.service';
 import { AuditService, CryptoService } from '../../core/services';
 import { TokenService } from '../../core/token.service';
 
@@ -26,7 +25,8 @@ export interface IssuedSession {
 export type LoginResult =
   | ({ kind: 'session' } & IssuedSession)
   | { kind: 'mfa_required'; mfaToken: string }
-  | { kind: 'mfa_setup_required'; mfaToken: string };
+  | { kind: 'mfa_setup_required'; mfaToken: string }
+  | { kind: 'password_change_required'; mfaToken: string };
 
 @Injectable()
 export class AuthService {
@@ -35,7 +35,6 @@ export class AuthService {
     private readonly tokens: TokenService,
     private readonly crypto: CryptoService,
     private readonly audit: AuditService,
-    private readonly limits: PlanLimitsService,
     @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
@@ -66,9 +65,36 @@ export class AuthService {
     }
     await this.db.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
 
+    // Senha provisória (cadastro/redefinição pelo dono): troca obrigatória antes de qualquer sessão.
+    if (user.mustChangePassword) return { kind: 'password_change_required', mfaToken: await this.tokens.signMfa(user.id, 'password') };
+    return this.afterPassword(user);
+  }
+
+  /** Etapas seguintes à senha válida: MFA quando exigida, senão abre a sessão. */
+  private async afterPassword(user: { id: string; mfaEnabled: boolean; platformRole: string | null }): Promise<LoginResult> {
     if (user.mfaEnabled) return { kind: 'mfa_required', mfaToken: await this.tokens.signMfa(user.id, 'verify') };
     if (user.platformRole === 'PLATFORM_SUPERADMIN') return { kind: 'mfa_setup_required', mfaToken: await this.tokens.signMfa(user.id, 'setup') };
     return { kind: 'session', ...(await this.createSession(user.id, false)) };
+  }
+
+  /** Troca obrigatória da senha provisória (token da etapa de login, válido por 5 min). */
+  async completeFirstPassword(token: string, newPassword: string): Promise<LoginResult> {
+    const { userId, purpose } = await this.tokens.verifyMfa(token);
+    if (purpose !== 'password') throw Errors.unauthenticated();
+    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!user.mustChangePassword || user.status !== 'ACTIVE') throw Errors.unauthenticated('Etapa de troca de senha expirada; faça login novamente');
+    if (await verify(user.passwordHash, newPassword).catch(() => false)) {
+      throw Errors.validation('A nova senha deve ser diferente da senha provisória');
+    }
+    await this.db.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await this.hashPassword(newPassword), passwordChangedAt: new Date(), mustChangePassword: false },
+      });
+      await tx.session.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date(), revokeReason: 'password_changed' } });
+    });
+    await this.audit.logSystem({ tenantId: null, actorId: user.id, action: 'temporary_password_replaced', entity: 'user', entityId: user.id });
+    return this.afterPassword(user);
   }
 
   async verifyMfa(mfaToken: string, code: string): Promise<IssuedSession> {
@@ -316,45 +342,6 @@ export class AuthService {
       await tx.session.updateMany({ where: { userId: user.id, revokedAt: null, NOT: { id: a.sessionId } }, data: { revokedAt: new Date(), revokeReason: 'password_changed' } });
     });
     await this.audit.logSystem({ tenantId: null, action: 'password_changed', entity: 'user', entityId: user.id });
-  }
-
-  /* ---------------------------------------------------------------- convites */
-
-  async previewInvitation(token: string) {
-    const inv = await this.db.invitation.findUnique({ where: { tokenHash: sha256Hex(token) }, include: { tenant: { select: { name: true } } } });
-    if (!inv || inv.acceptedAt || inv.revokedAt || inv.expiresAt < new Date()) throw Errors.tokenInvalid();
-    const existing = await this.db.user.findUnique({ where: { email: inv.email }, select: { id: true } });
-    return { tenantName: inv.tenant.name, email: inv.email, role: inv.role, roleLabel: ROLE_LABELS[inv.role as TenantRole], userExists: Boolean(existing) };
-  }
-
-  async acceptInvitation(token: string, name: string, password?: string) {
-    const inv = await this.db.invitation.findUnique({ where: { tokenHash: sha256Hex(token) } });
-    if (!inv || inv.acceptedAt || inv.revokedAt || inv.expiresAt < new Date()) throw Errors.tokenInvalid();
-    let user = await this.db.user.findUnique({ where: { email: inv.email } });
-    if (!user && !password) throw Errors.validation('Defina uma senha para criar seu acesso');
-    const passwordHash = user ? null : await this.hashPassword(password!);
-
-    await this.db.$transaction(async (tx: Tx) => {
-      const claimed = await tx.invitation.updateMany({ where: { id: inv.id, acceptedAt: null }, data: { acceptedAt: new Date() } });
-      if (!claimed.count) throw Errors.tokenInvalid();
-      if (!user) user = await tx.user.create({ data: { email: inv.email, name, passwordHash: passwordHash!, emailVerifiedAt: new Date() } });
-      const existing = await tx.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: inv.tenantId, userId: user.id } } });
-      if (existing && existing.status === 'ACTIVE') throw Errors.conflict('Você já participa desta empresa');
-      const membership = existing
-        ? await tx.tenantMembership.update({ where: { id: existing.id }, data: { role: inv.role, status: 'ACTIVE' } })
-        : await tx.tenantMembership.create({ data: { tenantId: inv.tenantId, userId: user.id, role: inv.role } });
-      await tx.membershipBranch.deleteMany({ where: { membershipId: membership.id } });
-      const branches = await tx.branch.findMany({ where: { tenantId: inv.tenantId, id: { in: inv.branchIds }, status: 'ACTIVE' }, select: { id: true } });
-      for (const b of branches) {
-        const isTechnician = inv.role === 'TECHNICIAN' || inv.technicianBranchIds.includes(b.id);
-        if (isTechnician) await this.limits.assert(tx, inv.tenantId, 'technicians_per_branch', b.id);
-        await tx.membershipBranch.create({ data: { tenantId: inv.tenantId, membershipId: membership.id, branchId: b.id, isTechnician } });
-      }
-      await tx.auditLog.create({
-        data: { tenantId: inv.tenantId, actorId: user.id, action: 'invitation_accepted', entity: 'tenant_membership', entityId: membership.id, metadataJson: { role: inv.role } },
-      });
-    });
-    return this.createSession(user!.id, false, inv.tenantId);
   }
 
   permissionsPreview(role: TenantRole) {

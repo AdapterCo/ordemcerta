@@ -1,9 +1,9 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, Res } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import {
-  acceptInvitationSchema,
   changePasswordSchema,
+  firstPasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   mfaEnableSchema,
@@ -21,7 +21,6 @@ import { AuthService, type IssuedSession } from './auth.service';
 import { assertCsrf, clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from './cookies';
 
 const mfaTokenSchema = z.object({ mfaToken: z.string().min(10).max(2000) });
-const tokenOnlySchema = z.object({ token: z.string().min(20).max(200) });
 
 @ApiTags('auth')
 @Controller('auth')
@@ -43,6 +42,17 @@ export class AuthController {
   @Doc('Login com e-mail e senha', { body: loginSchema })
   async login(@ZBody(loginSchema) body: z.infer<typeof loginSchema>, @Res({ passthrough: true }) res: Response) {
     const r = await this.auth.login(body.email, body.password);
+    if (r.kind === 'session') return { status: 'authenticated', ...this.issue(res, r) };
+    return { status: r.kind, mfaToken: r.mfaToken };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('first-password')
+  @HttpCode(200)
+  @Doc('Troca obrigatória da senha provisória (cadastro feito pelo dono/administrador)', { body: firstPasswordSchema })
+  async firstPassword(@ZBody(firstPasswordSchema) body: z.infer<typeof firstPasswordSchema>, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.completeFirstPassword(body.mfaToken, body.newPassword);
     if (r.kind === 'session') return { status: 'authenticated', ...this.issue(res, r) };
     return { status: r.kind, mfaToken: r.mfaToken };
   }
@@ -187,24 +197,5 @@ export class AuthController {
   @Doc('Revoga uma sessão')
   async revoke(@Param('id', ParseUUIDPipe) id: string) {
     await this.auth.revokeSession(auth().userId, id);
-  }
-
-  @Public()
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @Post('invitations/preview')
-  @HttpCode(200)
-  @Doc('Dados públicos do convite', { body: tokenOnlySchema })
-  previewInvitation(@ZBody(tokenOnlySchema) body: z.infer<typeof tokenOnlySchema>) {
-    return this.auth.previewInvitation(body.token);
-  }
-
-  @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @Post('invitations/accept')
-  @HttpCode(200)
-  @Doc('Aceita convite (cria acesso se necessário)', { body: acceptInvitationSchema })
-  async acceptInvitation(@Body() raw: unknown, @Res({ passthrough: true }) res: Response) {
-    const body = acceptInvitationSchema.parse(raw);
-    return { status: 'authenticated', ...this.issue(res, await this.auth.acceptInvitation(body.token, body.name, body.password)) };
   }
 }

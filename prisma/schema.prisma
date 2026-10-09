@@ -434,6 +434,8 @@ model User {
   lastLoginAt      DateTime?    @map("last_login_at") @db.Timestamptz(3)
   emailVerifiedAt  DateTime?    @map("email_verified_at") @db.Timestamptz(3)
   passwordChangedAt DateTime?   @map("password_changed_at") @db.Timestamptz(3)
+  /// Senha provisória definida pelo dono/administrador: troca obrigatória no próximo login.
+  mustChangePassword Boolean    @default(false) @map("must_change_password")
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 

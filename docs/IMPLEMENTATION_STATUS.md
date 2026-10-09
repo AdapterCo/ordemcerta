@@ -16,7 +16,7 @@ integração/E2E são executados na VPS (PostgreSQL 17 + Redis 7).
 
 | Módulo | Situação |
 |---|---|
-| auth (login Argon2id, bloqueio progressivo, MFA TOTP, refresh rotativo + reuso, CSRF, reset, convites, sessões, troca de empresa) | implementado |
+| auth (login Argon2id, bloqueio progressivo, MFA TOTP, refresh rotativo + reuso, CSRF, reset, cadastro direto de funcionários com senha provisória e troca obrigatória no 1º login, sessões, troca de empresa) | implementado |
 | tenant/filiais/membros/configurações/suporte auditado | implementado |
 | clientes/aparelhos/consentimentos/LGPD | implementado |
 | financeiro (recebíveis, pagamentos mistos, estornos, ledger, caixa) | implementado |

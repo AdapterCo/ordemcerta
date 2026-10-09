@@ -144,6 +144,68 @@ describe('quotas do plano e suspensão', () => {
   });
 });
 
+describe('cadastro direto de funcionário', () => {
+  const NEW_PASSWORD = 'MinhaSenha2026x';
+
+  it('dono cria com senha provisória; 1º login exige troca antes de qualquer sessão', async () => {
+    const F = await makeTenant('Equipe');
+    const owner = await new Http(base).login(F.ownerEmail);
+    const email = `tec.${randomUUID().slice(0, 8)}@ordemcerta.test`;
+    const c = await owner.req<any>('POST', '/members', { name: 'Técnico Teste', email, role: 'TECHNICIAN', branchIds: [F.branchId] });
+    expect(c.status).toBe(201);
+    expect(c.body.existingAccount).toBe(false);
+    const provisional = c.body.temporaryPassword as string;
+    expect(provisional).toMatch(/^[A-Za-z]{4}-\d{4}-[A-Za-z]{2}$/);
+
+    const anon = new Http(base);
+    const l = await anon.req<any>('POST', '/auth/login', { email, password: provisional });
+    expect(l.status).toBe(200);
+    expect(l.body.status).toBe('password_change_required');
+    expect(l.body.accessToken).toBeUndefined();
+
+    // token da troca não serve para MFA e a senha provisória não pode ser reaproveitada
+    expect((await anon.req('POST', '/auth/mfa/verify', { mfaToken: l.body.mfaToken, code: '123456' })).status).toBe(401);
+    expect((await anon.req('POST', '/auth/first-password', { mfaToken: l.body.mfaToken, newPassword: provisional })).status).toBeGreaterThanOrEqual(400);
+
+    const ok = await anon.req<any>('POST', '/auth/first-password', { mfaToken: l.body.mfaToken, newPassword: NEW_PASSWORD });
+    expect(ok.status).toBe(200);
+    expect(ok.body.status).toBe('authenticated');
+    expect(ok.body.accessToken).toBeTruthy();
+    // o mesmo token não pode ser usado de novo
+    expect((await anon.req('POST', '/auth/first-password', { mfaToken: l.body.mfaToken, newPassword: 'OutraSenha2026y' })).status).toBe(401);
+    await new Http(base).login(email, NEW_PASSWORD);
+  });
+
+  it('redefinição pelo dono; bloqueada para quem também participa de outra empresa', async () => {
+    const F = await makeTenant('Reset F');
+    const G = await makeTenant('Reset G');
+    const ownerF = await new Http(base).login(F.ownerEmail);
+    const ownerG = await new Http(base).login(G.ownerEmail);
+    const email = `rec.${randomUUID().slice(0, 8)}@ordemcerta.test`;
+    const c = await ownerF.req<any>('POST', '/members', { name: 'Recepção', email, role: 'RECEPTIONIST', branchIds: [F.branchId], password: 'Provisoria2026' });
+    expect(c.body.temporaryPassword).toBe('Provisoria2026');
+    const membershipId = c.body.membershipId as string;
+
+    const r = await ownerF.req<any>('POST', `/members/${membershipId}/reset-password`, {});
+    expect(r.status).toBe(200);
+    expect((await new Http(base).req('POST', '/auth/login', { email, password: 'Provisoria2026' })).status).toBe(401);
+    const l = await new Http(base).req<any>('POST', '/auth/login', { email, password: r.body.temporaryPassword });
+    expect(l.body.status).toBe('password_change_required');
+
+    // mesmo e-mail cadastrado em G: só ganha o vínculo, sem trocar a senha
+    const g = await ownerG.req<any>('POST', '/members', { name: 'Recepção', email, role: 'RECEPTIONIST', branchIds: [G.branchId] });
+    expect(g.status).toBe(201);
+    expect(g.body.existingAccount).toBe(true);
+    expect(g.body.temporaryPassword).toBeNull();
+    // agora nenhuma das duas empresas pode redefinir a senha dessa pessoa
+    expect((await ownerF.req('POST', `/members/${membershipId}/reset-password`, {})).status).toBe(403);
+    expect((await ownerG.req('POST', `/members/${g.body.membershipId}/reset-password`, {})).status).toBe(403);
+    // proprietário nunca
+    const ownerMembership = await system.tenantMembership.findFirstOrThrow({ where: { tenantId: F.tenantId, role: 'TENANT_OWNER' } });
+    expect((await ownerF.req('POST', `/members/${ownerMembership.id}/reset-password`, {})).status).toBe(403);
+  });
+});
+
 describe('fluxo completo da OS', () => {
   it('recepção → diagnóstico → orçamento → aprovação → reparo → baixa de peça → conclusão → pagamento → entrega → PDF', async () => {
     const F = await makeTenant('Fluxo');

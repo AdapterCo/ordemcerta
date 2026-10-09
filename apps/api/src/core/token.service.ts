@@ -11,6 +11,8 @@ export interface AccessClaims {
 
 const ISSUER = 'ordemcerta';
 
+export type LoginStepPurpose = 'verify' | 'setup' | 'password';
+
 @Injectable()
 export class TokenService {
   private readonly key: Uint8Array;
@@ -42,8 +44,8 @@ export class TokenService {
     }
   }
 
-  /** Token curto para a etapa de MFA (verificação ou configuração obrigatória). */
-  async signMfa(userId: string, purpose: 'verify' | 'setup'): Promise<string> {
+  /** Token curto da etapa pós-senha: MFA (verificação/configuração) ou troca obrigatória de senha. */
+  async signMfa(userId: string, purpose: LoginStepPurpose): Promise<string> {
     return new SignJWT({ typ: 'mfa', purpose })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(userId)
@@ -54,11 +56,12 @@ export class TokenService {
       .sign(this.key);
   }
 
-  async verifyMfa(token: string): Promise<{ userId: string; purpose: 'verify' | 'setup' }> {
+  async verifyMfa(token: string): Promise<{ userId: string; purpose: LoginStepPurpose }> {
     try {
       const { payload } = await jwtVerify(token, this.key, { issuer: ISSUER, audience: 'mfa', algorithms: ['HS256'] });
       if (payload.typ !== 'mfa' || !payload.sub) throw new Error();
-      return { userId: payload.sub, purpose: payload.purpose === 'setup' ? 'setup' : 'verify' };
+      const purpose: LoginStepPurpose = payload.purpose === 'setup' ? 'setup' : payload.purpose === 'password' ? 'password' : 'verify';
+      return { userId: payload.sub, purpose };
     } catch {
       throw Errors.unauthenticated('Etapa de verificação expirada; faça login novamente');
     }

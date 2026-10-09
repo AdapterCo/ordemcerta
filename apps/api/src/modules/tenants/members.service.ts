@@ -1,14 +1,23 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { verify } from '@node-rs/argon2';
-import { emailTemplate, randomToken, sha256Hex, type Tx } from '@ordemcerta/server';
-import { ROLE_LABELS, type TenantRole, inviteMemberSchema, updateMemberSchema } from '@ordemcerta/shared';
+import { Injectable } from '@nestjs/common';
+import { hash, verify } from '@node-rs/argon2';
+import { type Tx } from '@ordemcerta/server';
+import { type TenantRole, createMemberSchema, updateMemberSchema } from '@ordemcerta/shared';
+import { randomInt } from 'node:crypto';
 import type { z } from 'zod';
 import { auth, currentTenantId } from '../../core/context';
 import { SystemPrisma, TenantDb } from '../../core/database';
-import { ENV, type AppEnv } from '../../core/env.provider';
 import { Errors } from '../../core/errors';
 import { PlanLimitsService } from '../../core/plan-limits.service';
 import { AuditService } from '../../core/services';
+import { ARGON2_OPTS } from '../auth/auth.service';
+
+/** Senha provisória legível (sem caracteres ambíguos) que atende à política: letras + números, 12 caracteres. */
+function temporaryPassword(): string {
+  const letters = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const pick = (set: string, n: number) => Array.from({ length: n }, () => set[randomInt(set.length)]).join('');
+  return `${pick(letters, 4)}-${pick(digits, 4)}-${pick(letters, 2)}`;
+}
 
 @Injectable()
 export class MembersService {
@@ -17,7 +26,6 @@ export class MembersService {
     private readonly system: SystemPrisma,
     private readonly limits: PlanLimitsService,
     private readonly audit: AuditService,
-    @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
   list() {
@@ -31,12 +39,7 @@ export class MembersService {
         },
         orderBy: { createdAt: 'asc' },
       });
-      const invitations = await tx.invitation.findMany({
-        where: { tenantId, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
-        select: { id: true, email: true, role: true, branchIds: true, expiresAt: true, createdAt: true },
-        orderBy: { createdAt: 'desc' },
-      });
-      return { members, invitations };
+      return { members };
     });
   }
 
@@ -62,43 +65,85 @@ export class MembersService {
     if (found !== new Set(ids).size) throw Errors.validation('Filial inválida ou inativa');
   }
 
-  invite(input: z.infer<typeof inviteMemberSchema>) {
+  /**
+   * Cadastro direto pelo dono/administrador. Usuário novo recebe senha provisória
+   * (troca obrigatória no primeiro login). E-mail que já tem conta (ex.: trabalha em outra
+   * empresa) só ganha o vínculo, sem alterar a senha dele.
+   */
+  async create(input: z.infer<typeof createMemberSchema>) {
     this.assertRoleChangeAllowed(input.role);
-    return this.db.run(async (tx) => {
-      const tenantId = currentTenantId();
+    if (input.role !== 'TENANT_ADMIN' && !input.branchIds.length) throw Errors.validation('Selecione ao menos uma filial');
+    const tenantId = currentTenantId();
+    const actorId = auth().userId;
+    const provisional = input.password ?? temporaryPassword();
+    const passwordHash = await hash(provisional, ARGON2_OPTS);
+    const techIds = new Set(input.role === 'TECHNICIAN' ? input.branchIds : input.technicianBranchIds);
+
+    // Papel de sistema: a tabela de usuários não é gravável pelo papel da aplicação (escopo de tenant explícito).
+    const r = await this.system.$transaction(async (tx) => {
       await this.validateBranches(tx, tenantId, [...input.branchIds, ...input.technicianBranchIds]);
-      if (input.role !== 'TENANT_ADMIN' && !input.branchIds.length) throw Errors.validation('Selecione ao menos uma filial');
-      const already = await tx.tenantMembership.findFirst({ where: { tenantId, status: 'ACTIVE', user: { email: input.email } } });
-      if (already) throw Errors.conflict('Este e-mail já participa da empresa');
-      await tx.invitation.updateMany({ where: { tenantId, email: input.email, acceptedAt: null, revokedAt: null }, data: { revokedAt: new Date() } });
-      const token = randomToken(32);
-      const inv = await tx.invitation.create({
+      let user = await tx.user.findUnique({ where: { email: input.email } });
+      if (user?.platformRole) throw Errors.conflict('Este e-mail é reservado à administração da plataforma');
+      const created = !user;
+      if (!user) user = await tx.user.create({ data: { email: input.email, name: input.name, passwordHash, mustChangePassword: true } });
+      const existing = await tx.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } } });
+      if (existing?.status === 'ACTIVE') throw Errors.conflict('Este e-mail já participa da empresa');
+      const membership = existing
+        ? await tx.tenantMembership.update({ where: { id: existing.id }, data: { role: input.role, status: 'ACTIVE' } })
+        : await tx.tenantMembership.create({ data: { tenantId, userId: user.id, role: input.role } });
+      await tx.membershipBranch.deleteMany({ where: { membershipId: membership.id } });
+      for (const b of new Set(input.branchIds)) {
+        const isTechnician = techIds.has(b);
+        if (isTechnician) await this.limits.assert(tx, tenantId, 'technicians_per_branch', b);
+        await tx.membershipBranch.create({ data: { tenantId, membershipId: membership.id, branchId: b, isTechnician } });
+      }
+      await tx.auditLog.create({
         data: {
           tenantId,
-          email: input.email,
-          role: input.role,
-          branchIds: input.branchIds,
-          technicianBranchIds: input.role === 'TECHNICIAN' ? input.branchIds : input.technicianBranchIds,
-          tokenHash: sha256Hex(token),
-          expiresAt: new Date(Date.now() + 7 * 86_400_000),
-          invitedBy: auth().userId,
+          actorId,
+          action: created ? 'member_created' : 'member_linked_existing_user',
+          entity: 'tenant_membership',
+          entityId: membership.id,
+          metadataJson: { role: input.role },
         },
       });
-      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } });
-      const payload = { tenantName: tenant.name, role: ROLE_LABELS[input.role], link: `${this.env.APP_URL}/invite#token=${token}` };
-      const content = emailTemplate('invitation', payload);
-      await tx.emailOutbox.create({ data: { tenantId, toEmail: input.email, subject: content.subject, template: 'invitation', payloadJson: payload } });
-      await this.audit.log(tx, { action: 'member_invited', entity: 'invitation', entityId: inv.id, metadata: { role: input.role } });
-      return { id: inv.id, email: inv.email, role: inv.role, expiresAt: inv.expiresAt };
+      return { membershipId: membership.id, created };
     });
+    return {
+      membershipId: r.membershipId,
+      email: input.email,
+      // exibida uma única vez; nunca armazenada em texto
+      temporaryPassword: r.created ? provisional : null,
+      existingAccount: !r.created,
+    };
   }
 
-  revokeInvitation(id: string) {
-    return this.db.run(async (tx) => {
-      const n = await tx.invitation.updateMany({ where: { id, tenantId: currentTenantId(), acceptedAt: null, revokedAt: null }, data: { revokedAt: new Date() } });
-      if (!n.count) throw Errors.notFound('Convite');
-      await this.audit.log(tx, { action: 'invitation_revoked', entity: 'invitation', entityId: id });
+  /**
+   * Redefine a senha de um funcionário (ex.: esqueceu e o e-mail não está configurado).
+   * Só para quem pertence exclusivamente a esta empresa: impede tomar a conta de quem
+   * também trabalha em outra empresa. Proprietário e plataforma nunca.
+   */
+  async resetPassword(membershipId: string, password?: string) {
+    const a = auth();
+    const tenantId = currentTenantId();
+    const m = await this.system.tenantMembership.findFirst({ where: { id: membershipId, tenantId }, include: { user: true } });
+    if (!m) throw Errors.notFound('Membro');
+    if (m.userId === a.userId) throw Errors.forbidden('Para a sua própria senha use "Alterar senha" no seu perfil');
+    if (m.role === 'TENANT_OWNER' || m.user.platformRole) throw Errors.forbidden('Não é possível redefinir a senha deste usuário');
+    if (m.role === 'TENANT_ADMIN' && a.role !== 'TENANT_OWNER') throw Errors.forbidden('Somente o proprietário redefine a senha de administradores');
+    const elsewhere = await this.system.tenantMembership.count({ where: { userId: m.userId, NOT: { tenantId } } });
+    if (elsewhere) throw Errors.forbidden('Este usuário também participa de outra empresa; ele deve usar "Esqueci a senha"');
+    const provisional = password ?? temporaryPassword();
+    const passwordHash = await hash(provisional, ARGON2_OPTS);
+    await this.system.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: m.userId },
+        data: { passwordHash, mustChangePassword: true, failedLoginCount: 0, lockedUntil: null, passwordChangedAt: new Date() },
+      });
+      await tx.session.updateMany({ where: { userId: m.userId, revokedAt: null }, data: { revokedAt: new Date(), revokeReason: 'password_reset_by_admin' } });
+      await tx.auditLog.create({ data: { tenantId, actorId: a.userId, action: 'member_password_reset', entity: 'tenant_membership', entityId: m.id } });
     });
+    return { email: m.user.email, temporaryPassword: provisional };
   }
 
   update(membershipId: string, input: z.infer<typeof updateMemberSchema>) {

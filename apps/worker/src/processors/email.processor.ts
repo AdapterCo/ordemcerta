@@ -3,7 +3,7 @@ import { emailTemplate } from '@ordemcerta/server';
 import type { EmailOutbox } from '@prisma/client';
 import { Deps } from '../deps';
 
-/** Envio de e-mails do sistema (recuperação, convites, cobrança). Independe do WhatsApp do tenant. */
+/** Envio de e-mails do sistema (recuperação de senha, cobrança). Independe do WhatsApp do tenant. */
 @Injectable()
 export class EmailProcessor implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;

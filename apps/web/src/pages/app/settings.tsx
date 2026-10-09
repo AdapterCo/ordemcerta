@@ -1,6 +1,7 @@
 import { DOCUMENT_TEMPLATE_TYPES, TENANT_ROLES } from '@ordemcerta/shared';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import { QueryState, useAction, useApi } from '@/components/data';
 import { Alert, Badge, Button, Card, Checkbox, ConfirmDialog, Dialog, Field, Input, PageHeader, Select, Table, Td, Textarea, Th } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -167,17 +168,35 @@ export function UsersPage() {
   const { me } = useAuth();
   const q = useApi<any>(['members'], '/members');
   const branches = me?.current?.branches ?? [];
-  const [invite, setInvite] = useState<any | null>(null);
+  const [create, setCreate] = useState<any | null>(null);
   const [edit, setEdit] = useState<any | null>(null);
   const [transfer, setTransfer] = useState<any | null>(null);
+  const [resetTarget, setResetTarget] = useState<any | null>(null);
+  /** Credenciais exibidas uma única vez após cadastro/redefinição. */
+  const [credentials, setCredentials] = useState<{ title: string; email: string; password: string } | null>(null);
   const [pw, setPw] = useState('');
-  const send = useAction((_: void) => api('/members/invite', { method: 'POST', body: invite }), { success: 'Convite enviado por e-mail', invalidate: [['members']], onSuccess: () => setInvite(null) });
+  const send = useAction(
+    (_: void) => api<{ email: string; temporaryPassword: string | null; existingAccount: boolean }>('/members', { method: 'POST', body: { ...create, password: create.password || undefined } }),
+    {
+      invalidate: [['members']],
+      onSuccess: (r) => {
+        setCreate(null);
+        if (r.temporaryPassword) setCredentials({ title: 'Usuário criado', email: r.email, password: r.temporaryPassword });
+        else toast.success('Este e-mail já tinha conta no OrdemCerta: foi vinculado à empresa e entra com a senha que já usa.');
+      },
+    },
+  );
+  const reset = useAction((_: void) => api<{ email: string; temporaryPassword: string }>(`/members/${resetTarget.id}/reset-password`, { method: 'POST', body: {} }), {
+    onSuccess: (r) => {
+      setResetTarget(null);
+      setCredentials({ title: 'Senha redefinida', email: r.email, password: r.temporaryPassword });
+    },
+  });
   const save = useAction((_: void) => api(`/members/${edit.id}`, { method: 'PATCH', body: { role: edit.role, status: edit.status, branchIds: edit.branchIds, technicianBranchIds: edit.technicianBranchIds } }), {
     success: 'Membro atualizado',
     invalidate: [['members']],
     onSuccess: () => setEdit(null),
   });
-  const revoke = useAction((id: string) => api(`/members/invitations/${id}`, { method: 'DELETE' }), { success: 'Convite revogado', invalidate: [['members']] });
   const doTransfer = useAction((_: void) => api('/members/transfer-ownership', { method: 'POST', body: { membershipId: transfer.id, password: pw } }), { success: 'Propriedade transferida', invalidate: [['members']], onSuccess: () => setTransfer(null) });
   const BranchPicker = ({ value, onChange, tech, onTech }: { value: string[]; onChange: (v: string[]) => void; tech: string[]; onTech: (v: string[]) => void }) => (
     <div className="space-y-1">
@@ -191,7 +210,11 @@ export function UsersPage() {
   );
   return (
     <div className="space-y-4">
-      <PageHeader title="Usuários" actions={<Button onClick={() => setInvite({ email: '', role: 'RECEPTIONIST', branchIds: [], technicianBranchIds: [] })}>Convidar</Button>} />
+      <PageHeader
+        title="Usuários"
+        description="Cadastre o funcionário com uma senha provisória; no primeiro acesso ele cria a senha dele."
+        actions={<Button onClick={() => setCreate({ name: '', email: '', password: '', role: 'RECEPTIONIST', branchIds: branches.length === 1 ? [branches[0]!.id] : [], technicianBranchIds: [] })}>Novo usuário</Button>}
+      />
       <QueryState loading={q.isLoading} error={q.error}>
         <Table>
           <thead>
@@ -222,6 +245,11 @@ export function UsersPage() {
                       <Button size="sm" variant="secondary" onClick={() => setEdit({ id: m.id, role: m.role, status: m.status, branchIds: m.branches.map((b: any) => b.branchId), technicianBranchIds: m.branches.filter((b: any) => b.isTechnician).map((b: any) => b.branchId) })}>
                         Editar
                       </Button>
+                      {m.user.id !== me?.user.id && (m.role !== 'TENANT_ADMIN' || me?.current?.role === 'TENANT_OWNER') && (
+                        <Button size="sm" variant="ghost" onClick={() => setResetTarget(m)}>
+                          Redefinir senha
+                        </Button>
+                      )}
                       {me?.current?.role === 'TENANT_OWNER' && m.status === 'ACTIVE' && (
                         <Button size="sm" variant="ghost" onClick={() => setTransfer(m)}>
                           Tornar proprietário
@@ -234,29 +262,30 @@ export function UsersPage() {
             ))}
           </tbody>
         </Table>
-        {q.data?.invitations.length > 0 && (
-          <Card title="Convites pendentes" className="mt-4">
-            <ul className="space-y-1 text-sm">
-              {q.data.invitations.map((i: any) => (
-                <li key={i.id} className="flex items-center justify-between">
-                  {i.email} · {ROLE_LABELS[i.role as keyof typeof ROLE_LABELS]} · expira {formatDateTimeBR(i.expiresAt)}
-                  <Button size="sm" variant="ghost" onClick={() => revoke.mutate(i.id)}>
-                    Revogar
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
       </QueryState>
-      <Dialog open={Boolean(invite)} onOpenChange={() => setInvite(null)} title="Convidar usuário" footer={<Button loading={send.isPending} onClick={() => send.mutate()}>Enviar convite</Button>}>
-        {invite && (
+      <Dialog
+        open={Boolean(create)}
+        onOpenChange={() => setCreate(null)}
+        title="Novo usuário"
+        footer={
+          <Button loading={send.isPending} disabled={!create?.name || !create?.email} onClick={() => send.mutate()}>
+            Criar usuário
+          </Button>
+        }
+      >
+        {create && (
           <div className="space-y-3">
-            <Field label="E-mail" htmlFor="ie">
-              <Input id="ie" type="email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} />
+            <Field label="Nome" htmlFor="cn">
+              <Input id="cn" value={create.name} onChange={(e) => setCreate({ ...create, name: e.target.value })} />
             </Field>
-            <Field label="Papel" htmlFor="ir">
-              <Select id="ir" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>
+            <Field label="E-mail (usado no login)" htmlFor="ce">
+              <Input id="ce" type="email" autoComplete="off" value={create.email} onChange={(e) => setCreate({ ...create, email: e.target.value })} />
+            </Field>
+            <Field label="Senha provisória" htmlFor="cp" hint="Deixe em branco para o sistema gerar uma. Mínimo de 10 caracteres, com letras e números.">
+              <Input id="cp" autoComplete="new-password" value={create.password} onChange={(e) => setCreate({ ...create, password: e.target.value })} />
+            </Field>
+            <Field label="Papel" htmlFor="cr">
+              <Select id="cr" value={create.role} onChange={(e) => setCreate({ ...create, role: e.target.value })}>
                 {TENANT_ROLES.filter((r) => r !== 'TENANT_OWNER').map((r) => (
                   <option key={r} value={r}>
                     {ROLE_LABELS[r]}
@@ -264,8 +293,42 @@ export function UsersPage() {
                 ))}
               </Select>
             </Field>
-            <BranchPicker value={invite.branchIds} onChange={(v) => setInvite({ ...invite, branchIds: v })} tech={invite.technicianBranchIds} onTech={(v) => setInvite({ ...invite, technicianBranchIds: v })} />
-            <p className="text-xs text-slate-500">Técnicos ativos são limitados pelo plano (por filial).</p>
+            <BranchPicker value={create.branchIds} onChange={(v) => setCreate({ ...create, branchIds: v })} tech={create.technicianBranchIds} onTech={(v) => setCreate({ ...create, technicianBranchIds: v })} />
+            <p className="text-xs text-slate-500">Técnicos ativos são limitados pelo plano (por filial). No primeiro login o usuário é obrigado a trocar a senha.</p>
+          </div>
+        )}
+      </Dialog>
+      <ConfirmDialog
+        open={Boolean(resetTarget)}
+        onOpenChange={() => setResetTarget(null)}
+        title={`Redefinir a senha de ${resetTarget?.user.name}`}
+        description="Será gerada uma nova senha provisória e as sessões abertas desse usuário serão encerradas. No próximo login ele cria a senha dele."
+        loading={reset.isPending}
+        onConfirm={() => reset.mutate()}
+      />
+      <Dialog open={Boolean(credentials)} onOpenChange={() => setCredentials(null)} title={credentials?.title ?? ''} footer={<Button onClick={() => setCredentials(null)}>Pronto, anotei</Button>}>
+        {credentials && (
+          <div className="space-y-3">
+            <Alert tone="yellow">Esta senha aparece só agora. Entregue ao funcionário; no primeiro login ele cria a senha pessoal.</Alert>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+              <p>
+                E-mail: <strong>{credentials.email}</strong>
+              </p>
+              <p className="mt-1">
+                Senha provisória: <strong className="font-mono text-base">{credentials.password}</strong>
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(`Acesso OrdemCerta\n${window.location.origin}/login\nE-mail: ${credentials.email}\nSenha provisória: ${credentials.password}`)
+                  .then(() => toast.success('Copiado'))
+                  .catch(() => toast.error('Não foi possível copiar'))
+              }
+            >
+              Copiar acesso
+            </Button>
           </div>
         )}
       </Dialog>

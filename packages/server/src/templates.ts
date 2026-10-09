@@ -67,11 +67,6 @@ export function emailTemplate(template: string, data: Record<string, string>): E
         subject: 'Redefinição de senha — OrdemCerta',
         text: `Olá ${d('name')},\n\nRecebemos uma solicitação para redefinir sua senha. Use o link abaixo (válido por 30 minutos, uso único):\n${d('link')}\n\nSe você não solicitou, ignore este e-mail.`,
       };
-    case 'invitation':
-      return {
-        subject: `Convite para ${d('tenantName')} — OrdemCerta`,
-        text: `Você foi convidado para acessar ${d('tenantName')} como ${d('role')}.\nAceite o convite (válido por 7 dias): ${d('link')}`,
-      };
     case 'subscription_activated':
       return {
         subject: 'Assinatura ativada — OrdemCerta',

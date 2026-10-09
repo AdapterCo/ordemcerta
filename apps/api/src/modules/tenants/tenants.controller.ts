@@ -2,8 +2,9 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, P
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   branchSchema,
-  inviteMemberSchema,
+  createMemberSchema,
   paginationSchema,
+  resetMemberPasswordSchema,
   settingSchema,
   supportAccessGrantSchema,
   transferOwnershipSchema,
@@ -117,7 +118,7 @@ export class TenantsController {
 
   @Get('members')
   @Perm('users:manage')
-  @Doc('Membros e convites pendentes')
+  @Doc('Membros da empresa')
   listMembers() {
     return this.members.list();
   }
@@ -132,25 +133,17 @@ export class TenantsController {
   @Post('members')
   @Perm('users:manage')
   @Operational()
-  @Doc('Convida membro (alias de /members/invite)', { body: inviteMemberSchema })
-  createMember(@ZBody(inviteMemberSchema) body: z.infer<typeof inviteMemberSchema>) {
-    return this.members.invite(body);
+  @Doc('Cadastra funcionário com senha provisória (troca obrigatória no primeiro login)', { body: createMemberSchema })
+  createMember(@ZBody(createMemberSchema) body: z.infer<typeof createMemberSchema>) {
+    return this.members.create(body);
   }
 
-  @Post('members/invite')
+  @Post('members/:id/reset-password')
   @Perm('users:manage')
-  @Operational()
-  @Doc('Convida membro por e-mail (expira em 7 dias)', { body: inviteMemberSchema })
-  invite(@ZBody(inviteMemberSchema) body: z.infer<typeof inviteMemberSchema>) {
-    return this.members.invite(body);
-  }
-
-  @Delete('members/invitations/:id')
-  @Perm('users:manage')
-  @HttpCode(204)
-  @Doc('Revoga convite')
-  async revokeInvitation(@Param('id', ParseUUIDPipe) id: string) {
-    await this.members.revokeInvitation(id);
+  @HttpCode(200)
+  @Doc('Redefine a senha do funcionário (nova senha provisória)', { body: resetMemberPasswordSchema })
+  resetMemberPassword(@Param('id', ParseUUIDPipe) id: string, @ZBody(resetMemberPasswordSchema) body: z.infer<typeof resetMemberPasswordSchema>) {
+    return this.members.resetPassword(id, body.password);
   }
 
   @Patch('members/:id')

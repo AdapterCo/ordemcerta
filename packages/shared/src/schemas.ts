@@ -143,11 +143,8 @@ export const resetPasswordSchema = z.object({ token: z.string().min(20).max(200)
 export const switchTenantSchema = z.object({ tenantId: uuid });
 export const changePasswordSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: passwordSchema });
 
-export const acceptInvitationSchema = z.object({
-  token: z.string().min(20).max(200),
-  name: trimmed(120),
-  password: passwordSchema.optional(),
-});
+/** Troca obrigatória da senha provisória no primeiro login (token da etapa de login). */
+export const firstPasswordSchema = z.object({ mfaToken: z.string().min(10).max(2000), newPassword: passwordSchema });
 
 /* ------------------------------------------------------------ signup/billing */
 
@@ -195,12 +192,16 @@ export const branchSchema = z.object({
 });
 export const updateBranchSchema = branchSchema.partial().extend({ status: z.enum(['ACTIVE', 'INACTIVE']).optional() });
 
-export const inviteMemberSchema = z.object({
+/** Cadastro direto de funcionário. Sem senha = o sistema gera uma provisória (exibida uma única vez). */
+export const createMemberSchema = z.object({
+  name: trimmed(120),
   email: emailSchema,
+  password: passwordSchema.optional(),
   role: z.enum(TENANT_ROLES).refine((r) => r !== 'TENANT_OWNER', 'Use transferência de propriedade'),
   branchIds: z.array(uuid).max(50).default([]),
   technicianBranchIds: z.array(uuid).max(50).default([]),
 });
+export const resetMemberPasswordSchema = z.object({ password: passwordSchema.optional() });
 export const updateMemberSchema = z.object({
   role: z.enum(TENANT_ROLES).optional(),
   status: z.enum(['ACTIVE', 'DISABLED']).optional(),

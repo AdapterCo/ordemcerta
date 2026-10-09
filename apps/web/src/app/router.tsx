@@ -38,7 +38,6 @@ export const router = createBrowserRouter([
   { path: '/login', element: load(auth, 'LoginPage') },
   { path: '/forgot-password', element: load(auth, 'ForgotPasswordPage') },
   { path: '/reset-password', element: load(auth, 'ResetPasswordPage') },
-  { path: '/invite', element: load(auth, 'InvitePage') },
   { path: '/pricing', element: load(commercial, 'PricingPage') },
   { path: '/planos', element: load(commercial, 'PricingPage') },
   { path: '/signup', element: load(commercial, 'SignupPage') },
