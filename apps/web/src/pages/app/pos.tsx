@@ -172,6 +172,14 @@ export function PosPage() {
             </tr>
           </thead>
           <tbody>
+            {!cart.length && (
+              <tr>
+                <Td colSpan={6} className="py-14 text-center">
+                  <p className="font-display text-base font-semibold text-ink-900">Carrinho vazio</p>
+                  <p className="mt-1 text-sm text-ink-600/70">Leia o código de barras ou digite o nome do produto acima (atalho F2).</p>
+                </Td>
+              </tr>
+            )}
             {cart.map((c, i) => {
               const unit = c.product.promoPriceCents ?? c.product.priceCents;
               return (

@@ -86,8 +86,8 @@ export function ServiceOrdersPage() {
             {q.data?.items.map((o) => (
               <tr key={o.id} className="hover:bg-slate-50">
                 <Td>
-                  <Link className="font-medium text-brand-700 underline" to={`/app/service-orders/${o.id}`}>
-                    {o.number}
+                  <Link className="num font-semibold text-brand-700 hover:text-brand-800 hover:underline" to={`/app/service-orders/${o.id}`}>
+                    #{o.number}
                   </Link>
                 </Td>
                 <Td>
@@ -107,7 +107,7 @@ export function ServiceOrdersPage() {
                   <Badge tone={PRIORITY_TONE[o.priority]}>{PRIORITY_LABELS[o.priority as keyof typeof PRIORITY_LABELS]}</Badge>
                 </Td>
                 <Td>{o.technicianName ?? '—'}</Td>
-                <Td>{formatDateTimeBR(o.receivedAt)}</Td>
+                <Td className="num whitespace-nowrap text-xs text-ink-600/70">{formatDateTimeBR(o.receivedAt)}</Td>
                 <Td className={o.estimatedDeliveryAt && new Date(o.estimatedDeliveryAt) < new Date() && o.deliveryStatus === 'IN_CUSTODY' ? 'font-semibold text-red-600' : ''}>
                   {o.estimatedDeliveryAt ? formatDateBR(o.estimatedDeliveryAt) : '—'}
                 </Td>

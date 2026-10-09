@@ -50,7 +50,7 @@ export function WarrantiesPage() {
             {q.data?.items.map((c) => (
               <tr key={c.id}>
                 <Td>
-                  <Link className="text-brand-700 underline" to={`/app/service-orders/${c.orderId}`}>
+                  <Link className="text-brand-700 underline-offset-2 hover:underline" to={`/app/service-orders/${c.orderId}`}>
                     {c.order.number}
                   </Link>
                 </Td>

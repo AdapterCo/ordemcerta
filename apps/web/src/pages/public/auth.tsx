@@ -6,8 +6,8 @@ import { useForm } from 'react-hook-form';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import { PublicLayout } from '@/components/layout';
-import { Alert, Button, Card, Field, Input } from '@/components/ui';
+import { AuthLayout } from '@/components/layout';
+import { Alert, Button, Field, Input } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth, type LoginStep } from '@/lib/auth';
 import { fragmentParam } from '@/lib/utils';
@@ -98,9 +98,11 @@ export function LoginPage() {
   };
 
   return (
-    <PublicLayout>
-      <div className="mx-auto max-w-sm py-8">
-        <Card title={pwToken ? 'Defina sua senha' : mfa ? 'Verificação em duas etapas' : 'Entrar'}>
+    <AuthLayout
+      title={pwToken ? 'Defina sua senha' : mfa ? 'Verificação em duas etapas' : 'Bem-vindo de volta'}
+      subtitle={pwToken ? 'Primeiro acesso: crie a sua senha pessoal.' : mfa ? 'Digite o código do seu aplicativo autenticador.' : 'Entre com seu e-mail e senha para acessar a sua assistência.'}
+    >
+      <div>
           {pwToken ? (
             <form onSubmit={changeProvisional} className="space-y-4" noValidate>
               <Alert tone="blue" title="Primeiro acesso">
@@ -124,15 +126,15 @@ export function LoginPage() {
               <Field label="Senha" htmlFor="password" error={form.formState.errors.password?.message}>
                 <Input id="password" type="password" autoComplete="current-password" {...form.register('password')} />
               </Field>
-              <Button type="submit" className="w-full" loading={busy}>
+              <Button type="submit" size="lg" className="w-full" loading={busy}>
                 Entrar
               </Button>
               <div className="flex justify-between text-sm">
-                <Link to="/forgot-password" className="text-brand-700 underline">
+                <Link to="/forgot-password" className="font-medium text-brand-700 hover:text-brand-800 hover:underline">
                   Esqueci a senha
                 </Link>
-                <Link to="/pricing" className="text-brand-700 underline">
-                  Contratar
+                <Link to="/pricing" className="font-medium text-ink-700 hover:text-ink-900 hover:underline">
+                  Conhecer os planos →
                 </Link>
               </div>
             </form>
@@ -157,9 +159,8 @@ export function LoginPage() {
               </Button>
             </div>
           )}
-        </Card>
       </div>
-    </PublicLayout>
+    </AuthLayout>
   );
 }
 
@@ -175,9 +176,8 @@ export function ForgotPasswordPage() {
     }
   });
   return (
-    <PublicLayout>
-      <div className="mx-auto max-w-sm py-8">
-        <Card title="Recuperar senha">
+    <AuthLayout title="Recuperar senha" subtitle="Enviaremos um link para você criar uma nova senha.">
+      <div>
           {sent ? (
             <Alert tone="green">Se o e-mail estiver cadastrado, você receberá um link de redefinição válido por 30 minutos.</Alert>
           ) : (
@@ -190,9 +190,8 @@ export function ForgotPasswordPage() {
               </Button>
             </form>
           )}
-        </Card>
       </div>
-    </PublicLayout>
+    </AuthLayout>
   );
 }
 
@@ -212,9 +211,8 @@ export function ResetPasswordPage() {
     }
   });
   return (
-    <PublicLayout>
-      <div className="mx-auto max-w-sm py-8">
-        <Card title="Definir nova senha">
+    <AuthLayout title="Definir nova senha" subtitle="Escolha uma senha com letras e números.">
+      <div>
           {!token ? (
             <Alert tone="red">Link inválido. Solicite uma nova redefinição.</Alert>
           ) : (
@@ -230,8 +228,7 @@ export function ResetPasswordPage() {
               </Button>
             </form>
           )}
-        </Card>
       </div>
-    </PublicLayout>
+    </AuthLayout>
   );
 }

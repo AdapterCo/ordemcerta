@@ -97,7 +97,7 @@ export function CustomersPage() {
             {q.data?.items.map((c) => (
               <tr key={c.id} className="hover:bg-slate-50">
                 <Td>
-                  <Link className="font-medium text-brand-700 underline" to={`/app/customers/${c.id}`}>
+                  <Link className="font-medium text-brand-700 underline-offset-2 hover:underline" to={`/app/customers/${c.id}`}>
                     {c.name}
                   </Link>
                 </Td>
@@ -215,7 +215,7 @@ export function CustomerDetailPage() {
                 {c.serviceOrders.map((o: { id: string; number: number; technicalStatus: TechnicalStatus; totalCents: number; createdAt: string }) => (
                   <tr key={o.id}>
                     <Td>
-                      <Link className="text-brand-700 underline" to={`/app/service-orders/${o.id}`}>
+                      <Link className="text-brand-700 underline-offset-2 hover:underline" to={`/app/service-orders/${o.id}`}>
                         {o.number}
                       </Link>
                     </Td>

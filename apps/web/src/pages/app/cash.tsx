@@ -89,7 +89,7 @@ export function CashPage() {
                 <Td>{s.closedAt ? formatDateTimeBR(s.closedAt) : <Badge tone="green">aberto</Badge>}</Td>
                 <Td className={s.differenceCents ? 'font-semibold text-red-600' : ''}>{s.differenceCents === null ? '—' : formatBRL(s.differenceCents)}</Td>
                 <Td>
-                  <Link className="text-brand-700 underline" to={`/app/cash/sessions/${s.id}`}>
+                  <Link className="text-brand-700 underline-offset-2 hover:underline" to={`/app/cash/sessions/${s.id}`}>
                     Detalhes
                   </Link>
                 </Td>

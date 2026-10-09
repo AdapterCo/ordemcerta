@@ -126,60 +126,91 @@ export function AppLayout() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const navigate = useNavigate();
+  const loc = useLocation();
   useRealtime();
   const current = me!.current!;
   const visible = (i: NavItem) => (!i.perm || can(i.perm)) && (!i.anyPerm || i.anyPerm.some((p) => can(p)));
 
+  const initials = me!.user.name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join('');
+
   const sidebar = (
-    <nav className="flex h-full flex-col gap-4 overflow-y-auto p-3" aria-label="Navegação principal">
-      <Link to="/app/dashboard" className="px-2 text-lg font-bold text-brand-800">
-        OrdemCerta
+    <nav className="blueprint flex h-full flex-col overflow-y-auto bg-ink-900 text-white/80" aria-label="Navegação principal">
+      <Link to="/app/dashboard" className="flex items-center gap-2.5 px-5 pb-5 pt-6" onClick={() => setOpen(false)}>
+        <BrandMark className="h-8 w-8" />
+        <span className="font-display text-[19px] font-bold tracking-tight text-white">OrdemCerta</span>
       </Link>
-      {NAV.map((g, i) => {
-        const items = g.items.filter(visible);
-        if (!items.length) return null;
-        return (
-          <div key={i}>
-            {g.group && <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{g.group}</p>}
-            <ul className="space-y-0.5">
-              {items.map((it) => (
-                <li key={it.to}>
-                  <NavLink
-                    to={it.to}
-                    end={it.to === '/app/service-orders' || it.to === '/app/sales' || it.to === '/app/stock'}
-                    onClick={() => setOpen(false)}
-                    className={({ isActive }) =>
-                      cn('flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-100', isActive && 'bg-brand-50 font-semibold text-brand-800')
-                    }
-                  >
-                    {it.icon}
-                    {it.label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
+      <div className="flex-1 space-y-6 px-3 pb-6">
+        {NAV.map((g, i) => {
+          const items = g.items.filter(visible);
+          if (!items.length) return null;
+          return (
+            <div key={i}>
+              {g.group && <p className="mb-1.5 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">{g.group}</p>}
+              <ul className="space-y-0.5">
+                {items.map((it) => (
+                  <li key={it.to}>
+                    <NavLink
+                      to={it.to}
+                      end={it.to === '/app/service-orders' || it.to === '/app/sales' || it.to === '/app/stock'}
+                      onClick={() => setOpen(false)}
+                      className={({ isActive }) =>
+                        cn(
+                          'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors',
+                          isActive ? 'bg-white/[0.09] text-white' : 'text-white/65 hover:bg-white/[0.05] hover:text-white',
+                        )
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          {isActive && <span aria-hidden className="absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full bg-brand-400 shadow-[0_0_12px_var(--color-teal-400)]" />}
+                          <span className={cn('transition-colors', isActive ? 'text-brand-300' : 'text-white/45 group-hover:text-white/80')}>{it.icon}</span>
+                          {it.label}
+                        </>
+                      )}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+      <div className="border-t border-white/[0.08] px-4 py-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500/20 font-mono text-xs font-semibold text-brand-200">{initials}</span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-white">{me!.user.name}</p>
+            <p className="truncate text-xs text-white/45">{current.tenant.name}</p>
           </div>
-        );
-      })}
+          <button type="button" onClick={() => void logout()} aria-label="Sair" title="Sair" className="rounded-lg p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white">
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
     </nav>
   );
 
   return (
     <div className="flex min-h-screen">
-      <aside className="no-print hidden w-60 shrink-0 border-r border-slate-200 bg-white lg:block">{sidebar}</aside>
+      <aside className="no-print sticky top-0 hidden h-screen w-64 shrink-0 lg:block">{sidebar}</aside>
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-64 bg-white shadow-xl">{sidebar}</aside>
+          <div className="absolute inset-0 animate-fade bg-ink-950/50 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-72 animate-enter shadow-2xl">{sidebar}</aside>
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print sticky top-0 z-30 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+        <header className="no-print sticky top-0 z-30 flex flex-wrap items-center gap-2 border-b border-line/80 bg-paper/80 px-4 py-2.5 backdrop-blur-md">
           <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setOpen(true)} aria-label="Abrir menu">
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
           {me!.tenants.length > 1 ? (
-            <Select aria-label="Empresa" className="h-9 w-auto max-w-48" value={current.tenant.id} onChange={(e) => void switchTenant(e.target.value)}>
+            <Select aria-label="Empresa" className="h-9 w-auto max-w-48 font-semibold" value={current.tenant.id} onChange={(e) => void switchTenant(e.target.value)}>
               {me!.tenants.map((t) => (
                 <option key={t.tenantId} value={t.tenantId}>
                   {t.name}
@@ -187,7 +218,7 @@ export function AppLayout() {
               ))}
             </Select>
           ) : (
-            <span className="text-sm font-semibold text-slate-800">{current.tenant.name}</span>
+            <span className="hidden font-display text-[15px] font-semibold text-ink-900 sm:inline">{current.tenant.name}</span>
           )}
           {current.branches.length > 0 && (
             <Select aria-label="Filial" className="h-9 w-auto max-w-44" value={branchId ?? ''} onChange={(e) => setBranchId(e.target.value)}>
@@ -201,17 +232,17 @@ export function AppLayout() {
           {can('os:view') && (
             <form
               role="search"
-              className="relative min-w-40 flex-1 sm:max-w-sm"
+              className="relative min-w-40 flex-1 sm:max-w-md"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (q.trim()) navigate(`/app/service-orders?q=${encodeURIComponent(q.trim())}`);
               }}
             >
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-600/50" aria-hidden />
               <input
                 aria-label="Busca global"
-                className="h-9 w-full rounded-md border border-slate-300 pl-8 pr-3 text-sm"
-                placeholder="OS, cliente, telefone, IMEI (4 últimos)…"
+                className="h-9 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm shadow-[inset_0_1px_1px_rgb(16_48_47/0.04)] placeholder:text-ink-600/45 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-500/15"
+                placeholder="Buscar OS, cliente, telefone ou IMEI…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
               />
@@ -220,18 +251,31 @@ export function AppLayout() {
           <div className="ml-auto flex items-center gap-2">
             {can('messaging:view') && <WhatsAppBadge />}
             {current.supportAccess && <Badge tone="purple">Acesso de suporte (somente leitura)</Badge>}
-            <span className="hidden text-sm text-slate-600 sm:inline">{me!.user.name}</span>
-            <Button variant="ghost" size="sm" onClick={() => void logout()} aria-label="Sair">
-              <LogOut className="h-4 w-4" />
-            </Button>
+            {can('os:create') && (
+              <Link to="/app/service-orders/new" className="hidden sm:block">
+                <Button size="sm">
+                  <Plus className="h-4 w-4" /> Nova OS
+                </Button>
+              </Link>
+            )}
           </div>
         </header>
         <SubscriptionBanner />
-        <main className="flex-1 p-4">
+        <main key={loc.pathname} className="mx-auto w-full max-w-[1400px] flex-1 animate-enter px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />
         </main>
       </div>
     </div>
+  );
+}
+
+/** Marca: círculo verde-água com o "certo" (mesma do vídeo e do favicon). */
+export function BrandMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} aria-hidden>
+      <circle cx="24" cy="24" r="22" fill="#14b8a6" />
+      <path d="M14 25l7 7 14-15" stroke="#fff" strokeWidth="4.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -250,23 +294,36 @@ const PLATFORM_NAV = [
 
 export function PlatformLayout() {
   const { logout, me } = useAuth();
+  const loc = useLocation();
   return (
     <div className="min-h-screen">
-      <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-900 px-4 py-2 text-white">
-        <span className="font-bold">OrdemCerta · Plataforma</span>
-        <nav className="flex flex-wrap gap-1" aria-label="Plataforma">
+      <header className="blueprint sticky top-0 z-30 bg-ink-900 text-white">
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <Link to="/platform/dashboard" className="flex items-center gap-2.5">
+            <BrandMark className="h-7 w-7" />
+            <span className="font-display text-[17px] font-bold">OrdemCerta</span>
+            <span className="rounded-md bg-signal-500/20 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-signal-400">Plataforma</span>
+          </Link>
+          <span className="ml-auto hidden text-sm text-white/55 sm:inline">{me?.user.email}</span>
+          <button type="button" onClick={() => void logout()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-white/70 transition-colors hover:bg-white/10 hover:text-white">
+            <LogOut className="h-4 w-4" /> Sair
+          </button>
+        </div>
+        <nav className="mx-auto flex max-w-[1400px] gap-1 overflow-x-auto px-4 pb-2 sm:px-6 lg:px-8" aria-label="Plataforma">
           {PLATFORM_NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} className={({ isActive }) => cn('rounded px-2 py-1 text-sm hover:bg-slate-700', isActive && 'bg-slate-700')}>
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={({ isActive }) =>
+                cn('whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors', isActive ? 'bg-white/[0.12] text-white' : 'text-white/60 hover:bg-white/[0.06] hover:text-white')
+              }
+            >
               {n.label}
             </NavLink>
           ))}
         </nav>
-        <span className="ml-auto text-sm text-slate-300">{me?.user.email}</span>
-        <Button size="sm" variant="secondary" onClick={() => void logout()}>
-          Sair
-        </Button>
       </header>
-      <main className="p-4">
+      <main key={loc.pathname} className="mx-auto w-full max-w-[1400px] animate-enter px-4 py-6 sm:px-6 lg:px-8">
         <Outlet />
       </main>
     </div>
@@ -276,13 +333,56 @@ export function PlatformLayout() {
 export function PublicLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b border-slate-200 bg-white px-4 py-3">
-        <Link to="/" className="text-lg font-bold text-brand-800">
-          OrdemCerta
-        </Link>
+      <header className="border-b border-line/80 bg-white/70 px-4 py-3 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center">
+          <Link to="/" className="flex items-center gap-2">
+            <BrandMark className="h-7 w-7" />
+            <span className="font-display text-lg font-bold text-ink-950">OrdemCerta</span>
+          </Link>
+        </div>
       </header>
-      <main className="mx-auto w-full max-w-3xl flex-1 p-4">{children}</main>
-      <footer className="border-t border-slate-200 bg-white px-4 py-3 text-center text-xs text-slate-500">OrdemCerta — gestão de assistências técnicas</footer>
+      <main className="mx-auto w-full max-w-3xl flex-1 animate-enter p-4 sm:py-8">{children}</main>
+      <footer className="border-t border-line/80 px-4 py-4 text-center text-xs text-ink-600/60">OrdemCerta · gestão de assistências técnicas</footer>
+    </div>
+  );
+}
+
+/** Tela de entrada (login, senha): painel da marca à esquerda, formulário à direita. */
+export function AuthLayout({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
+      <aside className="blueprint relative hidden overflow-hidden bg-ink-900 p-12 text-white lg:flex lg:flex-col">
+        <div aria-hidden className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-brand-500/25 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-32 right-0 h-[28rem] w-[28rem] rounded-full bg-sky-500/15 blur-3xl" />
+        <Link to="/" className="relative flex items-center gap-3">
+          <BrandMark className="h-10 w-10" />
+          <span className="font-display text-2xl font-bold">OrdemCerta</span>
+        </Link>
+        <div className="relative mt-auto max-w-lg">
+          <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-brand-300">Gestão de assistência técnica</p>
+          <p className="mt-4 font-display text-[44px] font-bold leading-[1.05]">Do balcão à entrega, tudo no lugar certo.</p>
+          <ul className="mt-8 space-y-3 text-[15px] text-white/75">
+            {['OS digital com assinatura no celular do cliente', 'Acompanhamento online e orçamento pelo link', 'PDV, caixa, estoque e margem real por serviço'].map((t) => (
+              <li key={t} className="flex items-center gap-3">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-500/25 text-brand-300">✓</span>
+                {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="relative mt-12 text-xs text-white/35">© OrdemCerta</p>
+      </aside>
+      <main className="flex items-center justify-center px-5 py-10">
+        <div className="w-full max-w-[400px] animate-enter">
+          <Link to="/" className="mb-8 flex items-center gap-2.5 lg:hidden">
+            <BrandMark className="h-9 w-9" />
+            <span className="font-display text-xl font-bold text-ink-950">OrdemCerta</span>
+          </Link>
+          <h1 className="font-display text-[30px] font-bold leading-tight text-ink-950">{title}</h1>
+          {subtitle && <p className="mt-1.5 text-sm text-ink-600/80">{subtitle}</p>}
+          <div className="mt-7">{children}</div>
+        </div>
+      </main>
     </div>
   );
 }

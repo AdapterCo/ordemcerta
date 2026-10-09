@@ -149,7 +149,7 @@ export function PlatformTenantsPage() {
             {q.data?.items.map((t) => (
               <tr key={t.id}>
                 <Td>
-                  <Link className="text-brand-700 underline" to={`/platform/tenants/${t.id}`}>
+                  <Link className="text-brand-700 underline-offset-2 hover:underline" to={`/platform/tenants/${t.id}`}>
                     {t.name}
                   </Link>
                 </Td>

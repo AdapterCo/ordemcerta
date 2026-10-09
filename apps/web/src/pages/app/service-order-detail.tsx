@@ -1125,7 +1125,7 @@ export function ServiceOrderDetailPage() {
                     {q.data.warrantyClaims.map((c: any) => (
                       <Card key={c.id} title={`Solicitação de ${formatDateBR(c.createdAt)}`}>
                         <p className="text-sm">{c.reason}</p>
-                        <Link className="text-sm text-brand-700 underline" to="/app/warranties">
+                        <Link className="text-sm text-brand-700 underline-offset-2 hover:underline" to="/app/warranties">
                           Gerenciar em Garantias
                         </Link>
                       </Card>
