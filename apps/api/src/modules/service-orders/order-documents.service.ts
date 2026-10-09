@@ -15,7 +15,7 @@ import { TenantDb } from '../../core/database';
 import { ENV, type AppEnv } from '../../core/env.provider';
 import { Errors } from '../../core/errors';
 import { documentTemplate, trackingLink } from './order-helpers';
-import { OrderFilesService } from './order-files.service';
+import { OrderSignaturesService } from './order-signatures.service';
 
 export type OrderPdfType = 'intake' | 'pickup';
 
@@ -24,7 +24,7 @@ export type OrderPdfType = 'intake' | 'pickup';
 export class OrderDocumentsService {
   constructor(
     private readonly db: TenantDb,
-    private readonly files: OrderFilesService,
+    private readonly signatures: OrderSignaturesService,
     @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
@@ -76,10 +76,7 @@ export class OrderDocumentsService {
         terms.push({ title: DOCUMENT_TEMPLATE_LABELS[t], version: tpl.version, text: renderPlaceholders(tpl.content, vars) });
       }
       const signedTerm = o.terms.find((t) => t.termType === (type === 'intake' ? 'INTAKE' : 'PICKUP'));
-      const sigKey = signedTerm?.signatureFileId
-        ? (await tx.serviceOrderFile.findFirst({ where: { id: signedTerm.signatureFileId, tenantId } }))?.storageKey
-        : null;
-      const signaturePng = sigKey ? await this.files.readForPdf(sigKey) : null;
+      const signaturePng = signedTerm?.signatureFileId ? await this.signatures.read(tx, tenantId, signedTerm.signatureFileId) : null;
       const address = tenant.address as Record<string, string> | null;
 
       const pdf = await buildServiceOrderPdf(

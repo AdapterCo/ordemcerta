@@ -1,5 +1,5 @@
 # Stack completa (desenvolvimento/self-hosted). Produção: combine com docker-compose.prod.yml.
-#   docker compose up -d postgres redis minio && docker compose run --rm migrate && docker compose up -d
+#   docker compose up -d postgres redis && docker compose run --rm migrate && docker compose up -d
 name: ordemcerta
 
 x-app-env: &app-env
@@ -35,44 +35,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-    networks: [internal]
-
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ':9001'
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?defina MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defina MINIO_ROOT_PASSWORD}
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 15s
-      timeout: 5s
-      retries: 10
-    networks: [internal]
-
-  # Cria o bucket PRIVADO e o usuário de serviço da aplicação.
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set oc http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
-      mc mb --ignore-existing oc/$${S3_BUCKET} &&
-      mc anonymous set none oc/$${S3_BUCKET} &&
-      (mc admin user add oc $${S3_ACCESS_KEY_ID} $${S3_SECRET_ACCESS_KEY} || true) &&
-      (mc admin policy attach oc readwrite --user $${S3_ACCESS_KEY_ID} || true)"
-    env_file: .env
-    networks: [internal]
-
-  clamav:
-    image: clamav/clamav:stable
-    restart: unless-stopped
-    profiles: [antivirus]
     networks: [internal]
 
   # Job explícito e idempotente de migração (nunca prisma db push em produção).
@@ -127,7 +89,6 @@ services:
 volumes:
   pgdata:
   redisdata:
-  miniodata:
 
 networks:
   internal:

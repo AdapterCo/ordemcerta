@@ -363,17 +363,6 @@ export const DOCUMENT_TEMPLATE_LABELS: Record<DocumentTemplateType, string> = {
   PICKUP_RECEIPT: 'Recibo de retirada',
 };
 
-export const FileType = {
-  PHOTO_INTAKE: 'PHOTO_INTAKE',
-  PHOTO_DIAGNOSIS: 'PHOTO_DIAGNOSIS',
-  PHOTO_REPAIR: 'PHOTO_REPAIR',
-  PHOTO_WARRANTY: 'PHOTO_WARRANTY',
-  DOCUMENT: 'DOCUMENT',
-  SIGNATURE: 'SIGNATURE',
-} as const;
-export type FileType = (typeof FileType)[keyof typeof FileType];
-export const FILE_TYPES = values(FileType);
-
 export const ConsentChannel = { WHATSAPP: 'WHATSAPP', EMAIL: 'EMAIL', SMS: 'SMS' } as const;
 export type ConsentChannel = (typeof ConsentChannel)[keyof typeof ConsentChannel];
 export const ConsentPurpose = { SERVICE_NOTIFICATIONS: 'SERVICE_NOTIFICATIONS', MARKETING: 'MARKETING' } as const;

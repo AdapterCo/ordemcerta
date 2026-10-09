@@ -122,6 +122,18 @@ export async function openPdf(path: string, query?: ApiOptions['query'], headers
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** Baixa arquivo autenticado com o nome indicado (token nunca em URL). */
+export async function downloadFile(path: string, fileName: string) {
+  const res = await raw(path);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export const newIdemKey = () => crypto.randomUUID();
 
 export function errorMessage(e: unknown): string {

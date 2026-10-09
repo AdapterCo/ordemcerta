@@ -169,7 +169,7 @@ export function BillingPage() {
                 <Td>
                   {formatDateBR(i.periodStart)} – {formatDateBR(i.periodEnd)}
                 </Td>
-                <Td>{i.kind === 'PRORATION' ? 'Diferença de plano' : i.plan.name}</Td>
+                <Td>{i.kind === 'PRORATION' ? 'Diferença de plano' : i.kind === 'REGULARIZATION' ? `Regularização · ${i.plan.name}` : i.plan.name}</Td>
                 <Td>{formatBRL(i.amountCents)}</Td>
                 <Td>{formatDateBR(i.dueAt)}</Td>
                 <Td>
@@ -278,7 +278,7 @@ export function InvoicePage() {
     <QueryState loading={q.isLoading} error={q.error}>
       {q.data && (
         <div className="space-y-4">
-          <PageHeader title={`Fatura ${formatBRL(q.data.amountCents)}`} description={`${q.data.kind === 'PRORATION' ? 'Diferença de plano' : q.data.plan.name} · ${formatDateBR(q.data.periodStart)} – ${formatDateBR(q.data.periodEnd)}`} />
+          <PageHeader title={`Fatura ${formatBRL(q.data.amountCents)}`} description={`${q.data.kind === 'PRORATION' ? 'Diferença de plano' : q.data.kind === 'REGULARIZATION' ? `Regularização · ${q.data.plan.name}` : q.data.plan.name} · ${formatDateBR(q.data.periodStart)} – ${formatDateBR(q.data.periodEnd)}`} />
           <Badge tone={q.data.status === 'PAID' ? 'green' : 'yellow'}>{INVOICE_STATUS_LABELS[q.data.status as keyof typeof INVOICE_STATUS_LABELS]}</Badge>
           {['OPEN', 'PENDING', 'EXPIRED'].includes(q.data.status) && (
             <Card title="Pagamento via Pix">

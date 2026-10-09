@@ -26,7 +26,7 @@ export function PlatformDashboardPage() {
               <Stat label="Inadimplentes (tolerância)" value={m.tenants.pastDue} tone={m.tenants.pastDue ? 'yellow' : undefined} />
               <Stat label="Suspensas" value={m.tenants.suspended} tone={m.tenants.suspended ? 'red' : undefined} />
               <Stat label="Churn 30 dias" value={`${m.churn30d} (${m.churnRatePercent}%)`} />
-              <Stat label="Armazenamento" value={`${(m.storageBytes / 1024 / 1024).toFixed(1)} MB`} />
+              <Stat label="Assinaturas no banco" value={`${(m.storageBytes / 1024 / 1024).toFixed(1)} MB`} />
               <Stat label="Mensagens 30 dias" value={m.messagesSent30d} />
               <Stat label="Filiais ativas" value={m.activeBranches} />
               <Stat label="Usuários ativos" value={m.activeUsers} />
@@ -145,7 +145,7 @@ export function PlatformTenantPage() {
             <Stat label="Filiais" value={t._count.branches} />
             <Stat label="Membros" value={t._count.memberships} />
             <Stat label="OS" value={t.usage.serviceOrders} />
-            <Stat label="Armazenamento" value={`${(t.usage.storageBytes / 1024 / 1024).toFixed(1)} MB`} />
+            <Stat label="Assinaturas no banco" value={`${(t.usage.storageBytes / 1024 / 1024).toFixed(1)} MB`} />
           </div>
           {t.subscription && (
             <Card title="Assinatura">

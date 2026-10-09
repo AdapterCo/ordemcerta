@@ -2,8 +2,8 @@
 # Teste de restauração (mensal): restaura o backup mais recente em um banco
 # temporário, valida integridade básica e descarta. Não toca o banco de produção.
 set -euo pipefail
-: "${BACKUP_S3_URI:?defina BACKUP_S3_URI}"
-LATEST="$(aws s3 ls "$BACKUP_S3_URI/db/" | awk '{print $4}' | grep -E '\.dump\.gpg$' | sort | tail -1)"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/ordemcerta}"
+LATEST="$(ls -1 "$BACKUP_DIR/db/" 2>/dev/null | grep -E '\.dump\.gpg$' | sort | tail -1 || true)"
 [[ -n "$LATEST" ]] || { echo "nenhum backup encontrado"; exit 1; }
 TMP_DB="ordemcerta_restore_test"
 "$(dirname "$0")/restore.sh" "$LATEST" "$TMP_DB" --confirm

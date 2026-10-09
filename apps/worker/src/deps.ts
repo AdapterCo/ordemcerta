@@ -1,12 +1,10 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import {
   BillingEngine,
-  ClamAvScanner,
   createLogger,
   createMailer,
   createPrisma,
   createQueue,
-  createStorage,
   EncryptionService,
   loadEnv,
   MercadoPagoGateway,
@@ -28,7 +26,6 @@ export class Deps implements OnModuleDestroy {
   readonly log = createLogger(this.env.LOG_LEVEL, 'worker');
   readonly db: PrismaClient = createPrisma(this.env.DATABASE_SYSTEM_URL);
   readonly crypto = new EncryptionService(this.env.ENCRYPTION_KEY, this.env.ENCRYPTION_KEY_ID, this.env.ENCRYPTION_KEYS_PREVIOUS);
-  readonly storage = createStorage(this.env);
   readonly mailer = createMailer(this.env, (m) => this.log.info(m));
   readonly mp = new MercadoPagoGateway(this.env.MP_ACCESS_TOKEN, this.env.MP_WEBHOOK_SECRET, this.env.MP_WEBHOOK_TOLERANCE_SECONDS);
   readonly engine = new BillingEngine(this.db, this.mp, this.crypto, { appUrl: this.env.APP_URL }, {
@@ -37,7 +34,6 @@ export class Deps implements OnModuleDestroy {
     error: (o: unknown, m?: string) => this.log.error(o as object, m),
   } as unknown as Console);
   readonly whatsapp = new WhatsAppCloudProvider(this.env.META_GRAPH_VERSION, this.env.META_APP_ID, this.env.META_APP_SECRET);
-  readonly scanner = this.env.CLAMAV_HOST ? new ClamAvScanner(this.env.CLAMAV_HOST, this.env.CLAMAV_PORT) : null;
   readonly connection = redisConnection(this.env.REDIS_URL);
 
   private readonly queues = new Map<QueueName, Queue>();

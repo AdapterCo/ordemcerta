@@ -1,6 +1,5 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   assignSchema,
   cancelSchema,
@@ -8,7 +7,6 @@ import {
   completeRepairSchema,
   createServiceOrderSchema,
   deliverSchema,
-  fileUploadMetaSchema,
   intakeSignatureSchema,
   noteSchema,
   reopenSchema,
@@ -19,12 +17,10 @@ import {
   versionSchema,
 } from '@ordemcerta/shared';
 import type { Response } from 'express';
-import { memoryStorage } from 'multer';
 import { z } from 'zod';
 import { Idempotent, Operational, Perm } from '../../core/decorators';
 import { Doc, ZBody, ZQuery } from '../../core/zod';
 import { OrderDocumentsService } from './order-documents.service';
-import { OrderFilesService, type UploadedFile as UploadedFileT } from './order-files.service';
 import { ServiceOrdersService } from './service-orders.service';
 
 const reasonSchema = z.object({ reason: z.string().trim().min(5).max(300) });
@@ -36,7 +32,6 @@ const queueQuery = z.object({ branchId: z.string().uuid().optional(), mine: z.co
 export class ServiceOrdersController {
   constructor(
     private readonly orders: ServiceOrdersService,
-    private readonly files: OrderFilesService,
     private readonly docs: OrderDocumentsService,
   ) {}
 
@@ -239,38 +234,6 @@ export class ServiceOrdersController {
   @Doc('Registra checklist (entrada/pós-reparo)', { body: checklistSchema })
   checklist(@Param('id', ParseUUIDPipe) id: string, @ZBody(checklistSchema) body: z.infer<typeof checklistSchema>) {
     return this.orders.addChecklist(id, body);
-  }
-
-  @Get(':id/files')
-  @Perm('os:view')
-  @Doc('Lista anexos')
-  listFiles(@Param('id', ParseUUIDPipe) id: string) {
-    return this.files.list(id);
-  }
-
-  @Post(':id/files')
-  @Perm('os:files')
-  @Operational()
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 1 } }))
-  @Doc('Envia foto/documento (validação MIME real, tamanho, antivírus)')
-  upload(@Param('id', ParseUUIDPipe) id: string, @UploadedFile() file: UploadedFileT | undefined, @Body() body: unknown) {
-    return this.files.upload(id, fileUploadMetaSchema.parse(body).type, file);
-  }
-
-  @Get(':id/files/:fileId/url')
-  @Perm('os:view')
-  @Doc('URL assinada de curta duração')
-  fileUrl(@Param('id', ParseUUIDPipe) id: string, @Param('fileId', ParseUUIDPipe) fileId: string) {
-    return this.files.signedUrl(id, fileId);
-  }
-
-  @Delete(':id/files/:fileId')
-  @Perm('os:files')
-  @HttpCode(204)
-  @Doc('Remove anexo (exclusão lógica)')
-  async removeFile(@Param('id', ParseUUIDPipe) id: string, @Param('fileId', ParseUUIDPipe) fileId: string) {
-    await this.files.remove(id, fileId);
   }
 
   /** Token de acompanhamento opcional via header (nunca em URL). */

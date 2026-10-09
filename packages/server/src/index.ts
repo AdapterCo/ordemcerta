@@ -6,7 +6,6 @@ export * from './storage';
 export * from './mercadopago';
 export * from './whatsapp';
 export * from './mailer';
-export * from './antivirus';
 export * from './queues';
 export * from './templates';
 export * from './pdf';

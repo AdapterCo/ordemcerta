@@ -20,7 +20,7 @@ export function ProductsPage() {
   const save = useAction(
     (_: void) => {
       const body = { ...edit, barcode: edit.barcode || null, categoryId: edit.categoryId || null, location: edit.location || null, promoPriceCents: edit.promoPriceCents || null };
-      const { id, balances: _b, tenantId: _t, createdAt: _c, updatedAt: _u, imageStorageKey: _i, supplierId: _s, description: _d, ...rest } = body;
+      const { id, balances: _b, tenantId: _t, createdAt: _c, updatedAt: _u, supplierId: _s, description: _d, ...rest } = body;
       return id ? api(`/products/${id}`, { method: 'PATCH', body: rest }) : api('/products', { method: 'POST', body: rest });
     },
     { success: 'Produto salvo', invalidate: [['products']], onSuccess: () => setEdit(null) },

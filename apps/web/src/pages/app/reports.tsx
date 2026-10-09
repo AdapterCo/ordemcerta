@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { QueryState, useAction, useApi } from '@/components/data';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, Stat, Table, Td, Th } from '@/components/ui';
-import { api, errorMessage } from '@/lib/api';
+import { api, downloadFile, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatBRL, formatDateTimeBR, toDateInput } from '@/lib/utils';
 
@@ -49,9 +49,9 @@ export function ReportsPage() {
   const exp = useAction((format: 'CSV' | 'PDF') => api('/reports/exports', { method: 'POST', body: { reportType: type, format, params } }), { success: 'Exportação solicitada', invalidate: [['exports']] });
   const download = async (id: string) => {
     try {
-      const r = await api<{ url: string | null; status: string }>(`/reports/exports/${id}`);
-      if (r.url) window.open(r.url, '_blank', 'noopener');
-      else toast.info(`Exportação ${r.status === 'FAILED' ? 'falhou' : 'em processamento'}`);
+      const r = await api<{ ready: boolean; status: string; reportType: string; format: string }>(`/reports/exports/${id}`);
+      if (r.ready) await downloadFile(`/reports/exports/${id}/download`, `relatorio-${r.reportType}.${r.format.toLowerCase()}`);
+      else toast.info(`Exportação ${r.status === 'FAILED' ? 'falhou ou expirou' : 'em processamento'}`);
     } catch (e) {
       toast.error(errorMessage(e));
     }

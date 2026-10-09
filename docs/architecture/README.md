@@ -5,12 +5,10 @@
 ```
 Navegador ──HTTPS──> Traefik ──/──────────────> web (Nginx, SPA)
                          └──/api, /health──> api (NestJS) ──> PostgreSQL 17 (RLS)
-                                               │  Socket.IO   ├─> Redis 7 (filas, rate limit, adapter WS)
-                                               │              └─> S3/MinIO privado
+                                               │  Socket.IO   └─> Redis 7 (filas, rate limit, adapter WS)
                                                └─ outbox ──> worker (BullMQ) ──> Mercado Pago (plataforma)
                                                                             ├─> WhatsApp Cloud API (BYOK do tenant)
-                                                                            ├─> SMTP
-                                                                            └─> clamd
+                                                                            └─> SMTP
 ```
 
 ## Multi-tenancy
@@ -43,6 +41,10 @@ Navegador ──HTTPS──> Traefik ──/────────────
 - Ativação somente com pagamento **consultado na API oficial** após webhook com assinatura `x-signature` válida (SDK oficial `WebhookSignatureValidator`) ou reconciliação periódica. Redirect do navegador nunca ativa.
 - Transições monotônicas; período prorrogado uma vez por fatura (`applied_at`); dia-âncora preservado (29–31 → último dia do mês) em America/Sao_Paulo.
 - PAST_DUE com 3 dias de tolerância (parametrizável) → SUSPENDED (somente leitura; fechamento de caixa aberto permitido e auditado).
+- **Contestações (chargeback)** — webhook do tópico `payment` e do tópico "Contestações" (`topic_chargebacks_wh`, consulta `GET /v1/chargebacks/{id}`):
+  - contestação aberta (`in_mediation` ou `charged_back` em andamento), ganha (`charged_back/reimbursed`) ou coberta pelo Mercado Pago (`coverage_applied`): **somente auditoria**, uma vez por pagamento;
+  - contestação **perdida** (`charged_back/settled`): suspensão imediata **sem tolerância**, empresa SUSPENDED (dados preservados, somente leitura), demais faturas abertas anuladas, mudanças de plano pendentes canceladas (pró-rata contestada volta ao plano anterior), cartão desvinculado (PreApproval cancelado no MP; falha fica em `provider_cancel_pending` e a reconciliação tenta de novo), modo PIX_MANUAL e nova fatura `REGULARIZATION` com vencimento imediato. O pagamento dela reabre o ciclo a partir da data do pagamento. Proprietários recebem e-mail `chargeback_suspended`; auditoria `chargeback_lost_suspended` visível em Plataforma › Reconciliação.
+  - Pelo tópico `payment` a cobertura do provedor não é conhecida; por isso o tópico "Contestações" deve estar marcado no painel do Mercado Pago.
 
 ## WhatsApp (BYOK)
 

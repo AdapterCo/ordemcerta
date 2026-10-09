@@ -64,11 +64,15 @@ export interface ApplyResult {
   reason?: string;
   activatedTenantId?: string;
   planChangeToSync?: string;
+  /** Preapproval de cartão a cancelar no provedor após contestação perdida. */
+  preapprovalToCancel?: { subscriptionId: string; preapprovalId: string };
 }
 
 type Logger = Pick<Console, 'info' | 'warn' | 'error'>;
 
 const OPEN_INVOICE: BillingInvoice['status'][] = ['OPEN', 'PENDING', 'EXPIRED'];
+/** Faturas que definem período de cobertura (a de regularização reabre o ciclo após contestação perdida). */
+const PERIOD_KINDS: BillingInvoice['kind'][] = ['SUBSCRIPTION', 'REGULARIZATION'];
 
 export class BillingEngine {
   private readonly pixMinutes: number;
@@ -252,7 +256,7 @@ export class BillingEngine {
       throw new BillingError('CONFLICT', 'Vinculação de cartão disponível apenas com fatura em aberto');
     }
     const invoice = await this.db.billingInvoice.findFirst({
-      where: { subscriptionId: sub.id, kind: 'SUBSCRIPTION', status: { in: OPEN_INVOICE } },
+      where: { subscriptionId: sub.id, kind: { in: PERIOD_KINDS }, status: { in: OPEN_INVOICE } },
       orderBy: { periodStart: 'asc' },
     });
     if (!invoice) throw new BillingError('CONFLICT', 'Nenhuma fatura em aberto');
@@ -319,7 +323,7 @@ export class BillingEngine {
    * Aplica um pagamento CONSULTADO na API oficial. Idempotente e monotônico.
    * `hint.subscriptionId` é usado para cobranças de assinatura sem referência de fatura.
    */
-  async applyProviderPayment(np: NormalizedPayment, hint: { subscriptionId?: string } = {}, now = new Date()): Promise<ApplyResult> {
+  async applyProviderPayment(np: NormalizedPayment, hint: { subscriptionId?: string; coverageApplied?: boolean } = {}, now = new Date()): Promise<ApplyResult> {
     const attempt = await this.db.billingPaymentAttempt.findUnique({ where: { providerPaymentId: np.id } });
     let invoiceId: string | null = attempt?.invoiceId ?? null;
     let subscriptionId: string | null = hint.subscriptionId ?? null;
@@ -338,14 +342,14 @@ export class BillingEngine {
     }
     if (!invoiceId && subscriptionId) {
       let inv = await this.db.billingInvoice.findFirst({
-        where: { subscriptionId, kind: 'SUBSCRIPTION', status: { in: OPEN_INVOICE } },
+        where: { subscriptionId, kind: { in: PERIOD_KINDS }, status: { in: OPEN_INVOICE } },
         orderBy: { periodStart: 'asc' },
       });
       if (!inv && np.status === 'APPROVED') {
         // cobrança recorrente chegou antes da geração da fatura de renovação
         await this.generateRenewalForSubscription(subscriptionId, now, true);
         inv = await this.db.billingInvoice.findFirst({
-          where: { subscriptionId, kind: 'SUBSCRIPTION', status: { in: OPEN_INVOICE } },
+          where: { subscriptionId, kind: { in: PERIOD_KINDS }, status: { in: OPEN_INVOICE } },
           orderBy: { periodStart: 'asc' },
         });
       }
@@ -375,6 +379,19 @@ export class BillingEngine {
             currency: np.currency,
           });
           result.reason = 'AMOUNT_MISMATCH';
+          return;
+        }
+
+        // Contestação aberta/ganha ou perdida com cobertura do provedor: somente auditoria (uma vez por pagamento).
+        const auditOnly =
+          np.dispute === 'OPEN' ? 'chargeback_dispute_open'
+          : np.dispute === 'WON' ? 'chargeback_dispute_won'
+          : np.dispute === 'LOST' && hint.coverageApplied ? 'chargeback_covered_by_provider'
+          : null;
+        if (auditOnly) {
+          const seen = await tx.billingAuditLog.findFirst({ where: { action: auditOnly, entityId: invoice.id, metadataJson: { path: ['providerPaymentId'], equals: np.id } } });
+          if (!seen) await this.audit(tx, invoice.tenantId, auditOnly, 'billing_invoice', invoice.id, { providerPaymentId: np.id, statusDetail: np.statusDetail });
+          result.reason = 'DISPUTE_AUDIT_ONLY';
           return;
         }
 
@@ -433,7 +450,12 @@ export class BillingEngine {
           const otherApproved = await tx.billingPayment.findFirst({ where: { invoiceId: invoice.id, status: 'APPROVED', NOT: { providerPaymentId: np.id } } });
           if (thisPaid && !otherApproved) {
             await tx.billingInvoice.update({ where: { id: invoice.id }, data: { status: np.status === 'REFUNDED' ? 'REFUNDED' : 'CHARGEBACK' } });
-            await this.revokeCoverage(tx, invoice, sub, now);
+            if (np.status === 'CHARGEBACK') {
+              const pa = await this.applyChargebackLoss(tx, invoice, sub, np.id, now);
+              if (pa) result.preapprovalToCancel = { subscriptionId: sub.id, preapprovalId: pa };
+            } else {
+              await this.revokeCoverage(tx, invoice, sub, now);
+            }
             result.applied = true;
           }
           await this.audit(tx, invoice.tenantId, `payment_${np.status.toLowerCase()}`, 'billing_invoice', invoice.id, { providerPaymentId: np.id });
@@ -455,6 +477,18 @@ export class BillingEngine {
     );
 
     if (result.planChangeToSync) await this.syncPlanChange(result.planChangeToSync).catch((e) => this.log.warn({ err: (e as Error).message }, 'sync pendente'));
+    if (result.preapprovalToCancel) {
+      // Falha aqui não perde nada: providerCancelPending=true faz a reconciliação tentar de novo.
+      const { subscriptionId, preapprovalId } = result.preapprovalToCancel;
+      try {
+        const pa = await this.mp.cancelPreapproval(preapprovalId);
+        if (pa.status === 'cancelled') {
+          await this.db.subscription.update({ where: { id: subscriptionId }, data: { providerCancelPending: false, providerSubscriptionStatus: pa.status } });
+        }
+      } catch (e) {
+        this.log.warn({ err: (e as Error).message, subscriptionId }, 'cancelamento do cartão pendente após contestação');
+      }
+    }
     return result;
   }
 
@@ -528,7 +562,8 @@ export class BillingEngine {
       await tx.tenant.update({ where: { id: sub.tenantId }, data: { status: 'ACTIVE' } });
     }
     const plan = await tx.plan.findUniqueOrThrow({ where: { id: invoice.planId } });
-    await this.audit(tx, sub.tenantId, firstActivation ? 'subscription_activated' : 'subscription_renewed', 'subscription', sub.id, {
+    const action = invoice.kind === 'REGULARIZATION' ? 'subscription_regularized' : firstActivation ? 'subscription_activated' : 'subscription_renewed';
+    await this.audit(tx, sub.tenantId, action, 'subscription', sub.id, {
       invoiceId: invoice.id,
       periodStart,
       periodEnd: newEnd,
@@ -560,6 +595,88 @@ export class BillingEngine {
       });
       await this.audit(tx, sub.tenantId, 'coverage_revoked', 'subscription', sub.id, { invoiceId: invoice.id });
     }
+  }
+
+  /**
+   * Contestação PERDIDA (charged_back/settled, sem cobertura do provedor):
+   * suspensão imediata sem carência, cartão desvinculado (cancelado no provedor fora da transação),
+   * nova fatura de regularização via Pix. Dados preservados (somente leitura enquanto suspenso).
+   * Retorna o id do preapproval a cancelar, se houver.
+   */
+  private async applyChargebackLoss(tx: Tx, invoice: BillingInvoice, sub: Subscription, providerPaymentId: string, now: Date): Promise<string | null> {
+    let planId = sub.planId;
+    let priceCents = sub.priceCents;
+    if (invoice.kind === 'PRORATION') {
+      // a diferença de plano não foi paga de fato: volta ao plano anterior
+      const req = await tx.planChangeRequest.findFirst({ where: { invoiceId: invoice.id, status: { in: ['APPLIED', 'PENDING_PROVIDER_SYNC'] } } });
+      if (req) {
+        const from = await tx.plan.findUniqueOrThrow({ where: { id: req.fromPlanId } });
+        planId = from.id;
+        priceCents = from.priceCents;
+        await tx.planChangeRequest.update({ where: { id: req.id }, data: { status: 'CANCELED', canceledAt: now, pendingLock: null, version: { increment: 1 } } });
+      }
+    }
+
+    const others = await tx.billingInvoice.findMany({ where: { subscriptionId: sub.id, status: { in: OPEN_INVOICE }, NOT: { id: invoice.id } }, select: { id: true } });
+    const otherIds = others.map((o) => o.id);
+    if (otherIds.length) {
+      await tx.billingPaymentAttempt.updateMany({ where: { activeLock: { in: otherIds } }, data: { activeLock: null } });
+      await tx.billingInvoice.updateMany({ where: { id: { in: otherIds } }, data: { status: 'VOID' } });
+    }
+    await tx.planChangeRequest.updateMany({
+      where: { subscriptionId: sub.id, status: { in: ['PENDING_PAYMENT', 'PENDING_PROVIDER_SYNC', 'SCHEDULED'] } },
+      data: { status: 'CANCELED', canceledAt: now, pendingLock: null },
+    });
+
+    const preapprovalId = sub.paymentMode === 'CARD_RECURRING' && sub.providerSubscriptionId ? sub.providerSubscriptionId : null;
+    await tx.subscription.update({
+      where: { id: sub.id },
+      data: {
+        status: 'SUSPENDED',
+        suspendedAt: now,
+        graceUntil: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        planId,
+        priceCents,
+        scheduledPlanId: null,
+        cancelAtPeriodEnd: false,
+        cancelRequestedAt: null,
+        paymentMode: 'PIX_MANUAL',
+        providerCancelPending: Boolean(preapprovalId),
+        version: { increment: 1 },
+      },
+    });
+    await tx.tenant.update({ where: { id: sub.tenantId }, data: { status: 'SUSPENDED' } });
+
+    const p = initialPeriod(now);
+    const regularization = await tx.billingInvoice.create({
+      data: {
+        tenantId: sub.tenantId,
+        subscriptionId: sub.id,
+        planId,
+        kind: 'REGULARIZATION',
+        periodStart: now,
+        periodEnd: p.periodEnd,
+        amountCents: priceCents,
+        dueAt: now,
+        status: 'OPEN',
+        externalReference: randomUUID(),
+      },
+    });
+    await this.audit(tx, sub.tenantId, 'chargeback_lost_suspended', 'subscription', sub.id, {
+      invoiceId: invoice.id,
+      providerPaymentId,
+      regularizationInvoiceId: regularization.id,
+      voidedInvoices: otherIds,
+      preapprovalCancel: preapprovalId ? 'pending' : null,
+    });
+    await this.notifyOwners(tx, sub.tenantId, 'chargeback_suspended', {
+      amount: formatBRL(invoice.amountCents),
+      regularizationAmount: formatBRL(priceCents),
+      link: this.billingLink(regularization.id),
+    });
+    return preapprovalId;
   }
 
   /* ============================================================== webhooks */
@@ -624,6 +741,25 @@ export class BillingEngine {
           });
           break;
         }
+        case 'topic_chargebacks_wh':
+        case 'chargebacks':
+        case 'chargeback': {
+          // Contestações: consulta a contestação e reavalia cada pagamento envolvido (status oficial).
+          const cb = await this.mp.getChargeback(ev.resourceId);
+          if (!cb.paymentIds.length) {
+            outcome = 'IGNORED';
+            note = 'contestação sem pagamentos';
+            break;
+          }
+          const reasons: string[] = [];
+          for (const pid of cb.paymentIds) {
+            const np = await this.mp.getPayment(pid);
+            const r = await this.applyProviderPayment(np, { coverageApplied: cb.coverageApplied }, now);
+            if (r.reason) reasons.push(`${pid}:${r.reason}`);
+          }
+          note = reasons.length ? reasons.join(', ').slice(0, 900) : null;
+          break;
+        }
         default:
           outcome = 'IGNORED';
           note = `tópico não tratado: ${ev.resourceType}`;
@@ -663,7 +799,7 @@ export class BillingEngine {
       const sub = await tx.subscription.findUniqueOrThrow({ where: { id: subscriptionId }, include: { scheduledPlan: true } });
       if (!sub.currentPeriodEnd || !sub.anchorDay || sub.cancelAtPeriodEnd) return false;
       if (!force && sub.currentPeriodEnd.getTime() > now.getTime() + this.leadDays * 86_400_000) return false;
-      const open = await tx.billingInvoice.findFirst({ where: { subscriptionId, kind: 'SUBSCRIPTION', status: { in: OPEN_INVOICE } } });
+      const open = await tx.billingInvoice.findFirst({ where: { subscriptionId, kind: { in: PERIOD_KINDS }, status: { in: OPEN_INVOICE } } });
       if (open) return false;
       const { periodStart, periodEnd } = nextPeriod(sub.currentPeriodEnd, sub.anchorDay);
       const dup = await tx.billingInvoice.findUnique({ where: { subscriptionId_periodStart: { subscriptionId, periodStart } } });

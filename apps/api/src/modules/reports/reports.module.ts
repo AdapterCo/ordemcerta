@@ -1,22 +1,25 @@
-import { Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Prisma } from '@prisma/client';
 import { FINANCIAL_REPORTS, REPORTS } from '@ordemcerta/server';
 import { reportExportSchema, reportQuerySchema, type ReportType } from '@ordemcerta/shared';
+import type { Response } from 'express';
 import type { z } from 'zod';
 import { assertBranch, assertCan, auth, currentTenantId } from '../../core/context';
 import { TenantDb } from '../../core/database';
 import { Perm } from '../../core/decorators';
 import { Errors } from '../../core/errors';
-import { AuditService, QueueService, StorageService } from '../../core/services';
+import { AuditService, QueueService } from '../../core/services';
 import { Doc, ZBody, ZQuery } from '../../core/zod';
+
+const EXPORT_META = { id: true, reportType: true, format: true, status: true, error: true, createdAt: true, completedAt: true, expiresAt: true } as const;
+const isReady = (e: { status: string; expiresAt: Date | null }) => e.status === 'DONE' && (!e.expiresAt || e.expiresAt > new Date());
 
 @Injectable()
 export class ReportsService {
   constructor(
     private readonly db: TenantDb,
     private readonly queues: QueueService,
-    private readonly storage: StorageService,
     private readonly audit: AuditService,
   ) {}
 
@@ -43,7 +46,6 @@ export class ReportsService {
 
   createExport(input: z.infer<typeof reportExportSchema>) {
     if (FINANCIAL_REPORTS.includes(input.reportType)) assertCan('reports:financial');
-    this.storage.require();
     const f = this.filters(input.params);
     return this.db.run(async (tx, hooks) => {
       const e = await tx.reportExport.create({
@@ -63,15 +65,25 @@ export class ReportsService {
 
   getExport(id: string) {
     return this.db.run(async (tx) => {
-      const e = await tx.reportExport.findFirst({ where: { id, tenantId: currentTenantId(), requestedBy: auth().userId } });
+      const e = await tx.reportExport.findFirst({ where: { id, tenantId: currentTenantId(), requestedBy: auth().userId }, select: EXPORT_META });
       if (!e) throw Errors.notFound('Exportação');
-      const url = e.status === 'DONE' && e.storageKey && (!e.expiresAt || e.expiresAt > new Date()) ? await this.storage.signedUrl(e.storageKey, `relatorio-${e.reportType}.${e.format.toLowerCase()}`) : null;
-      return { ...e, url };
+      return { ...e, ready: isReady(e) };
     });
   }
 
   listExports() {
-    return this.db.run((tx) => tx.reportExport.findMany({ where: { tenantId: currentTenantId(), requestedBy: auth().userId }, orderBy: { createdAt: 'desc' }, take: 30 }));
+    return this.db.run((tx) => tx.reportExport.findMany({ where: { tenantId: currentTenantId(), requestedBy: auth().userId }, orderBy: { createdAt: 'desc' }, take: 30, select: EXPORT_META }));
+  }
+
+  /** Conteúdo gerado (guardado no banco até expirar). Somente o próprio solicitante. */
+  download(id: string) {
+    return this.db.run(async (tx) => {
+      const e = await tx.reportExport.findFirst({ where: { id, tenantId: currentTenantId(), requestedBy: auth().userId } });
+      if (!e) throw Errors.notFound('Exportação');
+      if (!isReady(e) || !e.content) throw Errors.conflict(e.status === 'DONE' ? 'Exportação expirada; gere novamente' : 'Exportação ainda não concluída');
+      await this.audit.log(tx, { action: 'report_export_downloaded', entity: 'report_export', entityId: e.id });
+      return { content: Buffer.from(e.content), contentType: e.contentType ?? 'application/octet-stream', fileName: `relatorio-${e.reportType}.${e.format.toLowerCase()}` };
+    });
   }
 }
 
@@ -146,9 +158,20 @@ export class ReportsController {
 
   @Get('exports/:id')
   @Perm('reports:export')
-  @Doc('Status da exportação e URL assinada quando pronta')
+  @Doc('Status da exportação')
   getExport(@Param('id', ParseUUIDPipe) id: string) {
     return this.reports.getExport(id);
+  }
+
+  @Get('exports/:id/download')
+  @Perm('reports:export')
+  @Doc('Baixa o arquivo da exportação (CSV/PDF)')
+  async download(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+    const f = await this.reports.download(id);
+    res.setHeader('Content-Type', f.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${f.fileName.replace(/[^\w.-]/g, '_')}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(f.content);
   }
 }
 

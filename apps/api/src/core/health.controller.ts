@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import { AppPrisma, SystemPrisma } from './database';
 import { Public } from './decorators';
 import { ENV, type AppEnv } from './env.provider';
-import { RedisService, StorageService } from './services';
+import { RedisService } from './services';
 
 @ApiTags('health')
 @Controller('health')
@@ -14,7 +14,6 @@ export class HealthController {
     private readonly app: AppPrisma,
     private readonly system: SystemPrisma,
     private readonly redis: RedisService,
-    private readonly storage: StorageService,
     @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
@@ -24,7 +23,7 @@ export class HealthController {
     return { status: 'ok' };
   }
 
-  /** Prontidão: banco (ambos os papéis), Redis e storage. Integrações listadas sem segredos. */
+  /** Prontidão: banco (ambos os papéis) e Redis. Integrações listadas sem segredos. */
   @Public()
   @Get('ready')
   async ready(@Res({ passthrough: true }) res: Response) {
@@ -39,11 +38,8 @@ export class HealthController {
     const database = await check(() => this.app.$queryRaw`SELECT 1`);
     const databaseSystem = await check(() => this.system.$queryRaw`SELECT 1`);
     const redis = await check(() => this.redis.client.ping());
-    const storage = this.storage.provider ? await check(async () => {
-      if (!(await this.storage.provider!.healthy())) throw new Error();
-    }) : null;
-    const ok = database && databaseSystem && redis && storage !== false;
+    const ok = database && databaseSystem && redis;
     res.status(ok ? 200 : 503);
-    return { status: ok ? 'ok' : 'degraded', checks: { database, databaseSystem, redis, storage }, integrations: integrationStatus(this.env) };
+    return { status: ok ? 'ok' : 'degraded', checks: { database, databaseSystem, redis }, integrations: integrationStatus(this.env) };
   }
 }

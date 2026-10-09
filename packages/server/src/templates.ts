@@ -102,6 +102,15 @@ export function emailTemplate(template: string, data: Record<string, string>): E
         subject: 'Pagamento não aprovado — OrdemCerta',
         text: `O pagamento da sua assinatura não foi aprovado (${d('reason')}). Tente novamente em: ${d('link')}`,
       };
+    case 'chargeback_suspended':
+      return {
+        subject: 'Assinatura suspensa por contestação de pagamento — OrdemCerta',
+        text:
+          `O pagamento de ${d('amount')} da sua assinatura foi contestado junto à operadora do cartão e a contestação foi concluída a favor do pagador (estorno). ` +
+          `Por isso a assinatura foi suspensa e o cartão foi desvinculado. Seus dados estão preservados.\n` +
+          `Para reativar, pague a fatura de regularização de ${d('regularizationAmount')} via Pix: ${d('link')}\n` +
+          `Se você não reconhece essa contestação, responda este e-mail.`,
+      };
     default:
       return { subject: 'OrdemCerta', text: d('text') };
   }

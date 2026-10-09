@@ -6491,136 +6491,6 @@
         ]
       }
     },
-    "/api/v1/service-orders/{id}/files": {
-      "get": {
-        "operationId": "ServiceOrdersController_listFiles",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Lista anexos",
-        "tags": [
-          "service-orders"
-        ]
-      },
-      "post": {
-        "operationId": "ServiceOrdersController_upload",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Envia foto/documento (validação MIME real, tamanho, antivírus)",
-        "tags": [
-          "service-orders"
-        ]
-      }
-    },
-    "/api/v1/service-orders/{id}/files/{fileId}/url": {
-      "get": {
-        "operationId": "ServiceOrdersController_fileUrl",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "fileId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "URL assinada de curta duração",
-        "tags": [
-          "service-orders"
-        ]
-      }
-    },
-    "/api/v1/service-orders/{id}/files/{fileId}": {
-      "delete": {
-        "operationId": "ServiceOrdersController_removeFile",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "fileId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove anexo (exclusão lógica)",
-        "tags": [
-          "service-orders"
-        ]
-      }
-    },
     "/api/v1/service-orders/{id}/pdf": {
       "get": {
         "operationId": "ServiceOrdersController_pdf",
@@ -8752,7 +8622,36 @@
             "bearer": []
           }
         ],
-        "summary": "Status da exportação e URL assinada quando pronta",
+        "summary": "Status da exportação",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/exports/{id}/download": {
+      "get": {
+        "operationId": "ReportsController_download",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Baixa o arquivo da exportação (CSV/PDF)",
         "tags": [
           "reports"
         ]

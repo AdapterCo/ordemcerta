@@ -5,7 +5,6 @@ export const QUEUES = {
   outbox: 'outbox',
   messaging: 'messaging',
   email: 'email',
-  files: 'files',
   exports: 'exports',
   billing: 'billing',
   maintenance: 'maintenance',
@@ -18,10 +17,6 @@ export interface MessagingJob {
 }
 export interface EmailJob {
   emailId: string;
-}
-export interface FileScanJob {
-  fileId: string;
-  tenantId: string;
 }
 export interface ExportJob {
   exportId: string;

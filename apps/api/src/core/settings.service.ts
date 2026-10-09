@@ -56,7 +56,6 @@ export const SETTING_DEFINITIONS = {
     schema: z.object({ start: z.string().regex(/^\d{2}:\d{2}$/), end: z.string().regex(/^\d{2}:\d{2}$/) }).nullable(),
     default: { start: '21:00', end: '08:00' },
   },
-  'privacy.photo_retention_days': { schema: z.number().int().min(30).max(3650), default: 730 },
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFINITIONS;

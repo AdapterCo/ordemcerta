@@ -8,7 +8,7 @@ integração/E2E são executados na VPS (PostgreSQL 17 + Redis 7).
 ## Estrutura
 
 - `packages/shared` — enums, permissões (RBAC), máquinas de estado, dinheiro, CPF/CNPJ (inclui alfanumérico), telefone E.164, datas/fuso, regras de billing (âncora, pró-rata, tolerância), planos (seed 17.1), schemas Zod usados por API e web. 28 testes unitários.
-- `packages/server` — env (Zod), criptografia AES-256-GCM com rotação + índice cego, Prisma helpers (RLS `SET LOCAL app.tenant_id`, contador transacional), storage S3/local, antivírus clamd, adapter Mercado Pago (SDK oficial), adapter WhatsApp Cloud API oficial + adaptador não oficial bloqueado, mailer, PDFs (pdfkit), filas BullMQ, motor de billing.
+- `packages/server` — env (Zod), criptografia AES-256-GCM com rotação + índice cego, Prisma helpers (RLS `SET LOCAL app.tenant_id`, contador transacional), adapter Mercado Pago (SDK oficial), adapter WhatsApp Cloud API oficial + adaptador não oficial bloqueado, mailer, PDFs (pdfkit), filas BullMQ, motor de billing.
 - `prisma/` — schema (71 tabelas), migration `init` gerada e migration `rls_integrity` (RLS deny-by-default, FKs compostas com tenant_id, triggers de imutabilidade e referência entre tenants, CHECKs, exclusão de períodos sobrepostos, grants por papel), seed idempotente.
 - `apps/api` — NestJS. Núcleo: contexto ALS, TenantDb (RLS), guards (auth/sessão revalidada, permissões, MFA plataforma, assinatura operacional, suporte somente leitura), idempotência, auditoria, outbox, realtime Socket.IO (rooms tenant/branch), quotas do plano com advisory lock, rate limit Redis, filtro de erros uniforme.
 
@@ -57,15 +57,24 @@ integração/E2E são executados na VPS (PostgreSQL 17 + Redis 7).
 ## Testes
 
 - Unitários: 40 (shared 28, server 9, worker 3) — verdes localmente.
-- Integração (`tests/integration`): RLS/isolamento, FKs compostas e triggers, imutabilidade, endpoints entre empresas, concorrência (última unidade, pagamento duplicado, sangrias simultâneas, versão de OS, quotas), suspensão, fluxo completo da OS, billing (Pix idempotente, ativação só com pagamento, webhook duplicado/fora de ordem, renovação única, tolerância → suspensão → reativação, upgrade/downgrade). **Não executados localmente** (sem PostgreSQL/Redis); executar no CI/VPS.
+- Integração (`tests/integration`): RLS/isolamento, FKs compostas e triggers, imutabilidade, endpoints entre empresas, concorrência (última unidade, pagamento duplicado, sangrias simultâneas, versão de OS, quotas), suspensão, fluxo completo da OS, billing (Pix idempotente, ativação só com pagamento, webhook duplicado/fora de ordem, renovação única, tolerância → suspensão → reativação, upgrade/downgrade, contestação aberta/ganha só audita, contestação perdida suspende e regularização reativa). **Não executados localmente** (sem PostgreSQL/Redis); executar no CI/VPS.
 - E2E (`tests/e2e`): fluxos principais com Playwright; requer stack em execução e dados de homologação.
 
 ## Limitações conhecidas
 
-- Integrações Mercado Pago, Meta/WhatsApp, SMTP, S3 e ClamAV implementadas, porém **não homologadas** — sem credenciais retornam "integração não configurada".
+- Integrações Mercado Pago, Meta/WhatsApp e SMTP implementadas, porém **não homologadas** — sem credenciais retornam "integração não configurada".
 - Cobrança avulsa por cartão da diferença de upgrade não implementada (exige checkout/tokenização); a diferença é paga via Pix mesmo para assinaturas de cartão.
 - Adaptador WhatsApp por QR Code (não oficial) não habilitado (falha explicitamente).
 - Embedded Signup da Meta depende de habilitação do app; fluxo assistido disponível.
 - Confirmação de e-mail no cadastro não implementada (opcional na especificação).
 - Documento fiscal fora do escopo (comprovantes marcados como NÃO FISCAL).
 - Termos/políticas são modelos e exigem revisão jurídica.
+
+## Decisão: sem armazenamento de objetos (2026-10-09)
+
+A pedido do responsável, removidos MinIO/S3, antivírus (ClamAV) e upload de fotos/anexos de OS (desvio consciente da instrução original). Consequências:
+- Assinatura do cliente (entrada/retirada) gravada no PostgreSQL (`service_order_files.content`, PNG ≤ 400 KB, append-only para o papel da aplicação).
+- Exportações CSV/PDF gravadas no banco (`report_exports.content`) e baixadas por `GET /reports/exports/:id/download`; conteúdo apagado após 7 dias.
+- Backups em diretório local da VPS (`BACKUP_DIR`); a cópia para fora da VPS fica a cargo do operador.
+- Migração `20261009000100_remove_object_storage` descarta registros de anexos/assinaturas antigos (não havia produção).
+

@@ -34,7 +34,7 @@ import { CustomersService } from '../customers/customers.service';
 import { FinanceService } from '../finance/finance.service';
 import { StockService } from '../stock/stock.service';
 import { documentTemplate, trackingLink } from './order-helpers';
-import { OrderFilesService } from './order-files.service';
+import { OrderSignaturesService } from './order-signatures.service';
 
 type Transition = {
   to: TechnicalStatus;
@@ -61,7 +61,7 @@ export class ServiceOrdersService {
     private readonly customers: CustomersService,
     private readonly finance: FinanceService,
     private readonly stock: StockService,
-    private readonly files: OrderFilesService,
+    private readonly signatures: OrderSignaturesService,
     @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
@@ -252,7 +252,6 @@ export class ServiceOrdersService {
           accessories: true,
           checklists: { orderBy: { completedAt: 'desc' } },
           notes: { orderBy: { createdAt: 'desc' } },
-          files: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' } },
           terms: { orderBy: { acceptedAt: 'desc' } },
           quotes: { include: { lines: { orderBy: { position: 'asc' } } }, orderBy: { version: 'desc' } },
           reservations: { include: { product: { select: { name: true, sku: true } } }, orderBy: { createdAt: 'desc' } },
@@ -452,7 +451,7 @@ export class ServiceOrdersService {
       const vars = { taxa_diagnostico: o.diagnosisFeeCents ? formatBRL(o.diagnosisFeeCents) : 'sem taxa', link_consulta: `${this.env.APP_URL}/status` };
       const text = `${renderPlaceholders(intake.content, vars)}\n\n${renderPlaceholders(resp.content, vars)}`;
       const documentHash = sha256Hex(`OS ${o.number}\n${o.reportedIssue}\n${text}`);
-      const file = await this.files.storeSignature(tx, o, input.signaturePng);
+      const file = await this.signatures.store(tx, o, input.signaturePng);
       const c = ctx();
       const term = await tx.serviceOrderTerm.create({
         data: {
@@ -762,7 +761,7 @@ export class ServiceOrdersService {
         override = true;
       }
       await bumpVersion(tx, 'service_orders', id, input.version);
-      const file = input.signaturePng ? await this.files.storeSignature(tx, o, input.signaturePng) : null;
+      const file = input.signaturePng ? await this.signatures.store(tx, o, input.signaturePng) : null;
       const now = new Date();
       const pickupText = (await documentTemplate(tx, o.tenantId, 'PICKUP_RECEIPT')).content;
       await tx.pickupReceipt.create({

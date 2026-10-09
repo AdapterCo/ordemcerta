@@ -1,4 +1,4 @@
-import MercadoPagoConfig, { Invoice, InvalidWebhookSignatureError, Payment, PreApproval, WebhookSignatureValidator } from 'mercadopago';
+import MercadoPagoConfig, { Invoice, InvalidWebhookSignatureError, Payment, PreApproval, User, WebhookSignatureValidator } from 'mercadopago';
 import type { BillingPaymentStatus } from '@ordemcerta/shared';
 
 /**
@@ -26,7 +26,31 @@ export interface NormalizedPayment {
   externalReference: string | null;
   dateApproved: string | null;
   paymentMethodId: string | null;
+  /** Situação de contestação/disputa do pagamento (chargeback). */
+  dispute: PaymentDispute;
   raw: Record<string, unknown>;
+}
+
+/**
+ * NONE: sem disputa · OPEN: disputa/contestação em andamento ·
+ * LOST: contestação concluída contra o vendedor (valor estornado) ·
+ * WON: contestação resolvida a favor do vendedor (valor reembolsado).
+ */
+export type PaymentDispute = 'NONE' | 'OPEN' | 'LOST' | 'WON';
+
+export interface ChargebackInfo {
+  id: string;
+  paymentIds: string[];
+  coverageApplied: boolean;
+  documentationStatus: string | null;
+}
+
+export function mpDispute(status: string | undefined | null, statusDetail: string | undefined | null): PaymentDispute {
+  if (status === 'in_mediation') return 'OPEN';
+  if (status !== 'charged_back') return 'NONE';
+  if (statusDetail === 'settled') return 'LOST';
+  if (statusDetail === 'reimbursed') return 'WON';
+  return 'OPEN';
 }
 
 export interface PixCharge {
@@ -141,9 +165,12 @@ export class MercadoPagoGateway {
 
   async getPayment(id: string): Promise<NormalizedPayment> {
     const p = await new Payment(this.cfg()).get({ id });
+    const dispute = mpDispute(p.status, p.status_detail);
     return {
       id: String(p.id),
-      status: mapMpStatus(p.status),
+      // Disputa em aberto ou ganha não altera o status efetivo do pagamento; só a perdida vira CHARGEBACK.
+      status: dispute === 'LOST' ? 'CHARGEBACK' : dispute === 'NONE' ? mapMpStatus(p.status) : 'APPROVED',
+      dispute,
       rawStatus: String(p.status ?? ''),
       statusDetail: p.status_detail ?? null,
       amountCents: toCents(p.transaction_amount),
@@ -231,6 +258,31 @@ export class MercadoPagoGateway {
       status: (r.status as string) ?? null,
       amountCents: r.transaction_amount !== undefined ? toCents(r.transaction_amount) : null,
     };
+  }
+
+  private callerId: string | null = null;
+
+  /**
+   * Consulta um caso de contestação (GET /v1/chargebacks/{id}). O SDK não possui
+   * cliente para este recurso; usa-se a API REST oficial com o mesmo token.
+   */
+  async getChargeback(id: string): Promise<ChargebackInfo> {
+    const cfg = this.cfg();
+    if (!this.callerId) {
+      const me = (await new User(cfg).get()) as unknown as { id?: number | string };
+      this.callerId = me.id !== undefined ? String(me.id) : null;
+    }
+    const res = await fetch(`https://api.mercadopago.com/v1/chargebacks/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${cfg.accessToken}`, ...(this.callerId ? { 'X-Caller-Id': this.callerId } : {}) },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`consulta de contestação falhou (HTTP ${res.status})`);
+    const r = (await res.json()) as { id?: unknown; payments?: unknown[]; coverage_applied?: boolean; documentation_status?: string };
+    const paymentIds = (r.payments ?? [])
+      .map((p) => (typeof p === 'object' && p !== null ? (p as { id?: unknown }).id : p))
+      .filter((p) => p !== undefined && p !== null && p !== '')
+      .map(String);
+    return { id: String(r.id ?? id), paymentIds, coverageApplied: Boolean(r.coverage_applied), documentationStatus: r.documentation_status ?? null };
   }
 
   /**

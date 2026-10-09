@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { FILE_TYPES, PAYMENT_METHODS, QUOTE_LINE_KINDS, lineTotalCents, type Permission, type TechnicalStatus } from '@ordemcerta/shared';
+import { PAYMENT_METHODS, QUOTE_LINE_KINDS, lineTotalCents, type Permission, type TechnicalStatus } from '@ordemcerta/shared';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -426,84 +426,6 @@ function PartsTab({ o }: { o: Order }) {
   );
 }
 
-/* --------------------------------------------------------------- arquivos */
-
-function FilesTab({ o }: { o: Order }) {
-  const { can } = useAuth();
-  const [type, setType] = useState('PHOTO_INTAKE');
-  const [file, setFile] = useState<File | null>(null);
-  const upload = useAction(
-    (_: void) => {
-      const fd = new FormData();
-      fd.append('type', type);
-      fd.append('file', file!);
-      return api(`/service-orders/${o.id}/files`, { method: 'POST', body: fd });
-    },
-    { success: 'Arquivo enviado', invalidate: [['os', o.id]] },
-  );
-  const view = async (fileId: string) => {
-    try {
-      const r = await api<{ url: string }>(`/service-orders/${o.id}/files/${fileId}/url`);
-      window.open(r.url, '_blank', 'noopener');
-    } catch (e) {
-      toast.error(errorMessage(e));
-    }
-  };
-  const labels: Record<string, string> = { PHOTO_INTAKE: 'Foto de entrada', PHOTO_DIAGNOSIS: 'Foto de diagnóstico', PHOTO_REPAIR: 'Foto do reparo', PHOTO_WARRANTY: 'Foto de garantia', DOCUMENT: 'Documento', SIGNATURE: 'Assinatura' };
-  return (
-    <div className="space-y-4">
-      {can('os:files') && (
-        <Card title="Enviar arquivo">
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label="Tipo" htmlFor="ftype">
-              <Select id="ftype" value={type} onChange={(e) => setType(e.target.value)}>
-                {FILE_TYPES.filter((t) => t !== 'SIGNATURE').map((t) => (
-                  <option key={t} value={t}>
-                    {labels[t]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <input aria-label="Arquivo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,application/pdf" capture="environment" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            <Button disabled={!file} loading={upload.isPending} onClick={() => upload.mutate()}>
-              Enviar
-            </Button>
-          </div>
-          <p className="mt-2 text-xs text-slate-500">JPEG, PNG, WEBP, HEIC ou PDF. Arquivos privados, verificados por antivírus quando configurado.</p>
-        </Card>
-      )}
-      <Table>
-        <thead>
-          <tr>
-            <Th>Tipo</Th>
-            <Th>Enviado</Th>
-            <Th>Verificação</Th>
-            <Th />
-          </tr>
-        </thead>
-        <tbody>
-          {o.files.map((f: any) => (
-            <tr key={f.id}>
-              <Td>{labels[f.type]}</Td>
-              <Td>{formatDateTimeBR(f.createdAt)}</Td>
-              <Td>
-                <Badge tone={f.scanStatus === 'CLEAN' ? 'green' : f.scanStatus === 'INFECTED' ? 'red' : 'gray'}>
-                  {{ PENDING: 'Em verificação', CLEAN: 'Limpo', INFECTED: 'Bloqueado', NOT_SCANNED: 'Não verificado', ERROR: 'Erro' }[f.scanStatus as string]}
-                </Badge>
-              </Td>
-              <Td>
-                <Button size="sm" variant="secondary" onClick={() => void view(f.id)}>
-                  Abrir
-                </Button>
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </div>
-  );
-}
-
 /* -------------------------------------------------------------- pagamento */
 
 function PaymentTab({ o }: { o: Order }) {
@@ -823,7 +745,6 @@ export function ServiceOrderDetailPage() {
               },
               { value: 'quote', label: 'Orçamento', content: <QuoteTab o={q.data} /> },
               { value: 'parts', label: 'Peças', content: <PartsTab o={q.data} /> },
-              { value: 'files', label: 'Fotos e arquivos', content: <FilesTab o={q.data} /> },
               { value: 'payment', label: 'Pagamento', content: <PaymentTab o={q.data} /> },
               {
                 value: 'history',

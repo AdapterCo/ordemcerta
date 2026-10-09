@@ -18,8 +18,13 @@ class FakeGateway {
     if (!this.payments.has(id)) this.payments.set(id, this.np(id, 'PENDING', input.amountCents, input.externalReference));
     return { providerPaymentId: id, status: 'PENDING' as const, qrCode: '000201FAKE', qrCodeBase64: null, ticketUrl: null, expiresAt: input.expiresAt };
   }
-  np(id: string, status: NormalizedPayment['status'], amountCents: number, externalReference: string | null): NormalizedPayment {
-    return { id, status, rawStatus: status.toLowerCase(), statusDetail: null, amountCents, currency: 'BRL', externalReference, dateApproved: status === 'APPROVED' ? new Date().toISOString() : null, paymentMethodId: 'pix', raw: {} };
+  canceledPreapprovals: string[] = [];
+  np(id: string, status: NormalizedPayment['status'], amountCents: number, externalReference: string | null, dispute: NormalizedPayment['dispute'] = 'NONE'): NormalizedPayment {
+    return { id, status, rawStatus: status.toLowerCase(), statusDetail: null, amountCents, currency: 'BRL', externalReference, dateApproved: status === 'APPROVED' ? new Date().toISOString() : null, paymentMethodId: 'pix', dispute, raw: {} };
+  }
+  async cancelPreapproval(id: string) {
+    this.canceledPreapprovals.push(id);
+    return { id, status: 'cancelled' };
   }
   async getPayment(id: string) {
     return this.payments.get(id)!;
@@ -133,5 +138,59 @@ describe('billing da plataforma', () => {
 
     for (let i = 0; i < 3; i++) await system.branch.create({ data: { tenantId: tenant.id, name: `F${i}` } });
     await expect(engine.requestPlanChange(tenant.id, 'ESSENCIAL', actor)).rejects.toMatchObject({ code: 'PLAN_DOWNGRADE_BLOCKED' });
+  });
+
+  it('contestação aberta ou ganha: somente auditoria, nada muda', async () => {
+    const { tenant, invoice } = await pendingTenant();
+    const pid = `m-${randomUUID()}`;
+    await engine.applyProviderPayment(gw.np(pid, 'APPROVED', invoice.amountCents, invoice.externalReference));
+    const before = await system.subscription.findUniqueOrThrow({ where: { tenantId: tenant.id } });
+    const r1 = await engine.applyProviderPayment(gw.np(pid, 'APPROVED', invoice.amountCents, invoice.externalReference, 'OPEN'));
+    await engine.applyProviderPayment(gw.np(pid, 'APPROVED', invoice.amountCents, invoice.externalReference, 'OPEN'));
+    expect(r1.reason).toBe('DISPUTE_AUDIT_ONLY');
+    const after = await system.subscription.findUniqueOrThrow({ where: { tenantId: tenant.id } });
+    expect(after.status).toBe('ACTIVE');
+    expect(after.currentPeriodEnd!.getTime()).toBe(before.currentPeriodEnd!.getTime());
+    expect(await system.billingAuditLog.count({ where: { tenantId: tenant.id, action: 'chargeback_dispute_open' } })).toBe(1);
+    await engine.applyProviderPayment(gw.np(pid, 'APPROVED', invoice.amountCents, invoice.externalReference, 'WON'));
+    expect((await system.billingInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('PAID');
+  });
+
+  it('contestação perdida: suspensão imediata, cartão cancelado, regularização via Pix reativa', async () => {
+    const { tenant, sub, invoice } = await pendingTenant();
+    const pid = `cb-${randomUUID()}`;
+    await engine.applyProviderPayment(gw.np(pid, 'APPROVED', invoice.amountCents, invoice.externalReference));
+    const preapprovalId = `pa-${randomUUID()}`;
+    await system.subscription.update({ where: { id: sub.id }, data: { paymentMode: 'CARD_RECURRING', providerSubscriptionId: preapprovalId } });
+
+    // coberta pelo provedor: não suspende
+    const covered = await engine.applyProviderPayment(gw.np(pid, 'CHARGEBACK', invoice.amountCents, invoice.externalReference, 'LOST'), { coverageApplied: true });
+    expect(covered.reason).toBe('DISPUTE_AUDIT_ONLY');
+    expect((await system.subscription.findUniqueOrThrow({ where: { id: sub.id } })).status).toBe('ACTIVE');
+
+    const lost = await engine.applyProviderPayment(gw.np(pid, 'CHARGEBACK', invoice.amountCents, invoice.externalReference, 'LOST'));
+    expect(lost.applied).toBe(true);
+    const s = await system.subscription.findUniqueOrThrow({ where: { id: sub.id } });
+    expect(s.status).toBe('SUSPENDED');
+    expect(s.graceUntil).toBeNull();
+    expect(s.paymentMode).toBe('PIX_MANUAL');
+    expect(s.providerCancelPending).toBe(false);
+    expect(gw.canceledPreapprovals).toContain(preapprovalId);
+    expect((await system.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).status).toBe('SUSPENDED');
+    expect((await system.billingInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('CHARGEBACK');
+    expect(await system.billingAuditLog.count({ where: { tenantId: tenant.id, action: 'chargeback_lost_suspended' } })).toBe(1);
+
+    // reprocessar o mesmo evento não gera nova regularização
+    await engine.applyProviderPayment(gw.np(pid, 'CHARGEBACK', invoice.amountCents, invoice.externalReference, 'LOST'));
+    const regs = await system.billingInvoice.findMany({ where: { subscriptionId: sub.id, kind: 'REGULARIZATION' } });
+    expect(regs).toHaveLength(1);
+    expect(regs[0]!.status).toBe('OPEN');
+
+    const paidAt = new Date();
+    await engine.applyProviderPayment(gw.np(`reg-${randomUUID()}`, 'APPROVED', regs[0]!.amountCents, regs[0]!.externalReference));
+    const re = await system.subscription.findUniqueOrThrow({ where: { id: sub.id } });
+    expect(re.status).toBe('ACTIVE');
+    expect(re.currentPeriodEnd!.getTime()).toBeGreaterThan(paidAt.getTime());
+    expect((await system.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).status).toBe('ACTIVE');
   });
 });

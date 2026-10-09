@@ -125,23 +125,6 @@ enum NoteVisibility {
   CUSTOMER
 }
 
-enum FileType {
-  PHOTO_INTAKE
-  PHOTO_DIAGNOSIS
-  PHOTO_REPAIR
-  PHOTO_WARRANTY
-  DOCUMENT
-  SIGNATURE
-}
-
-enum ScanStatus {
-  PENDING
-  CLEAN
-  INFECTED
-  NOT_SCANNED
-  ERROR
-}
-
 enum TermType {
   INTAKE
   PICKUP
@@ -380,6 +363,8 @@ enum InvoiceStatus {
 enum InvoiceKind {
   SUBSCRIPTION
   PRORATION
+  /// Regularização após contestação perdida (chargeback): reabre o ciclo a partir do pagamento.
+  REGULARIZATION
 }
 
 enum BillingMethod {
@@ -505,7 +490,6 @@ model Tenant {
   phone                 String?      @db.VarChar(20)
   email                 String?      @db.VarChar(254)
   address               Json?
-  logoStorageKey        String?      @map("logo_storage_key")
   primaryColor          String?      @map("primary_color") @db.VarChar(7)
   onboardingCompletedAt DateTime?    @map("onboarding_completed_at") @db.Timestamptz(3)
   createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -1163,19 +1147,18 @@ model ServiceOrderNote {
   @@map("service_order_notes")
 }
 
+/// Assinatura do cliente (PNG pequeno) guardada no próprio banco — sem storage de objetos.
+/// Evidência imutável referenciada por termos de entrada/retirada.
 model ServiceOrderFile {
-  id         String     @id @default(uuid(7)) @db.Uuid
-  tenantId   String     @map("tenant_id") @db.Uuid
-  orderId    String     @map("order_id") @db.Uuid
-  storageKey String     @unique @map("storage_key")
-  type       FileType
-  mime       String     @db.VarChar(100)
-  sizeBytes  Int        @map("size_bytes")
-  checksum   String     @db.VarChar(64)
-  scanStatus ScanStatus @default(PENDING) @map("scan_status")
-  uploadedBy String     @map("uploaded_by") @db.Uuid
-  deletedAt  DateTime?  @map("deleted_at") @db.Timestamptz(3)
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  id         String   @id @default(uuid(7)) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  orderId    String   @map("order_id") @db.Uuid
+  mime       String   @db.VarChar(100)
+  sizeBytes  Int      @map("size_bytes")
+  checksum   String   @db.VarChar(64)
+  content    Bytes
+  uploadedBy String   @map("uploaded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   order ServiceOrder @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict)
 
@@ -1426,7 +1409,6 @@ model Product {
   minStock        Int         @default(0) @map("min_stock")
   active          Boolean     @default(true)
   location        String?     @db.VarChar(60)
-  imageStorageKey String?     @map("image_storage_key")
   createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -2002,7 +1984,9 @@ model ReportExport {
   format      ExportFormat
   paramsJson  Json         @map("params_json")
   status      ExportStatus @default(QUEUED)
-  storageKey  String?      @map("storage_key")
+  /// Arquivo gerado (CSV/PDF) guardado no banco até expirar (7 dias); removido pela manutenção.
+  content     Bytes?
+  contentType String?      @map("content_type") @db.VarChar(60)
   error       String?      @db.VarChar(500)
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   completedAt DateTime?    @map("completed_at") @db.Timestamptz(3)

@@ -16,7 +16,6 @@ Gerada de `packages/shared/src/permissions.ts`. Negar por padrão; verificação
 | `os:deliver_override` | ✅ | ✅ | ✅ |  |  |  |  |
 | `os:cancel` | ✅ | ✅ | ✅ |  |  |  |  |
 | `os:reopen` | ✅ | ✅ | ✅ |  |  |  |  |
-| `os:files` | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |
 | `os:internal_notes` | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |
 | `os:unlock_secret` | ✅ | ✅ | ✅ |  | ✅ |  |  |
 | `quote:create` | ✅ | ✅ | ✅ | ✅ | ✅ |  |  |

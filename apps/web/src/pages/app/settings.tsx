@@ -68,14 +68,13 @@ export function CompanySettingsPage() {
         </Card>
       )}
       {settings.data && (
-        <Card title="Políticas operacionais" actions={<Button size="sm" loading={savePolicy.isPending} onClick={() => savePolicy.mutate(['os.default_warranty_days', 'os.sla_hours', 'os.require_payment_for_delivery', 'stock.allow_negative', 'cash.one_session_per_operator', 'sales.max_discount_percent_without_permission', 'portal.require_otp_for_quote', 'quote.default_valid_days', 'privacy.photo_retention_days'])}>Salvar</Button>}>
+        <Card title="Políticas operacionais" actions={<Button size="sm" loading={savePolicy.isPending} onClick={() => savePolicy.mutate(['os.default_warranty_days', 'os.sla_hours', 'os.require_payment_for_delivery', 'stock.allow_negative', 'cash.one_session_per_operator', 'sales.max_discount_percent_without_permission', 'portal.require_otp_for_quote', 'quote.default_valid_days'])}>Salvar</Button>}>
           <div className="grid gap-3 sm:grid-cols-3">
             {[
               ['os.default_warranty_days', 'Garantia padrão (dias)'],
               ['os.sla_hours', 'SLA da OS (horas)'],
               ['sales.max_discount_percent_without_permission', 'Desconto máx. sem permissão (%)'],
               ['quote.default_valid_days', 'Validade do orçamento (dias)'],
-              ['privacy.photo_retention_days', 'Retenção de fotos (dias)'],
             ].map(([k, l]) => (
               <Field key={k} label={l!} htmlFor={k}>
                 <Input id={k} type="number" value={policy[k!] ?? ''} onChange={(e) => setPolicy({ ...policy, [k!]: Number(e.target.value) })} />

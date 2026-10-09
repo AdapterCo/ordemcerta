@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   ACCESSORY_TYPES,
   DOCUMENT_TEMPLATE_TYPES,
-  FILE_TYPES,
   MESSAGING_EVENT_TYPES,
   PAYMENT_METHODS,
   PRIORITIES,
@@ -347,7 +346,6 @@ export const cancelSchema = versionSchema.extend({ reason: trimmed(500) });
 export const reopenSchema = versionSchema.extend({ reason: trimmed(500) });
 export const checklistSchema = z.object({ phase: z.enum(['INTAKE', 'POST_REPAIR']), items: z.array(checklistItemSchema).min(1).max(60) });
 export const noteSchema = z.object({ text: trimmed(4000), visibility: z.enum(['INTERNAL', 'CUSTOMER']).default('INTERNAL') });
-export const fileUploadMetaSchema = z.object({ type: z.enum(FILE_TYPES) });
 export const intakeSignatureSchema = z.object({
   signerName: trimmed(120),
   signerDocument: optionalText(20),

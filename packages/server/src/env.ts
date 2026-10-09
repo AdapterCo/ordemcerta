@@ -39,20 +39,6 @@ export const envSchema = z
     ENCRYPTION_KEYS_PREVIOUS: optionalString,
     COOKIE_SECURE: bool(true),
 
-    STORAGE_DRIVER: z.enum(['s3', 'local', 'none']).default('none'),
-    S3_ENDPOINT: optionalString,
-    S3_REGION: z.string().default('us-east-1'),
-    S3_BUCKET: optionalString,
-    S3_ACCESS_KEY_ID: optionalString,
-    S3_SECRET_ACCESS_KEY: optionalString,
-    S3_FORCE_PATH_STYLE: bool(true),
-    STORAGE_LOCAL_DIR: z.string().default('./storage-local'),
-    MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(50).default(10),
-    SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(120),
-
-    CLAMAV_HOST: optionalString,
-    CLAMAV_PORT: z.coerce.number().int().default(3310),
-
     MAIL_TRANSPORT: z.enum(['smtp', 'console', 'none']).default('none'),
     SMTP_HOST: optionalString,
     SMTP_PORT: z.coerce.number().int().default(587),
@@ -77,9 +63,6 @@ export const envSchema = z
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
-      if (env.STORAGE_DRIVER === 'local') {
-        ctx.addIssue({ code: 'custom', path: ['STORAGE_DRIVER'], message: 'Armazenamento local não é permitido em produção' });
-      }
       if (env.MAIL_TRANSPORT === 'console') {
         ctx.addIssue({ code: 'custom', path: ['MAIL_TRANSPORT'], message: 'Transporte console não é permitido em produção' });
       }
@@ -89,9 +72,6 @@ export const envSchema = z
       if (env.API_DOCS_ENABLED && (!env.API_DOCS_USER || !env.API_DOCS_PASSWORD)) {
         ctx.addIssue({ code: 'custom', path: ['API_DOCS_ENABLED'], message: 'OpenAPI em produção exige API_DOCS_USER/API_DOCS_PASSWORD' });
       }
-    }
-    if (env.STORAGE_DRIVER === 's3' && (!env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY)) {
-      ctx.addIssue({ code: 'custom', path: ['STORAGE_DRIVER'], message: 'S3 exige S3_BUCKET, S3_ACCESS_KEY_ID e S3_SECRET_ACCESS_KEY' });
     }
     if (env.MAIL_TRANSPORT === 'smtp' && !env.SMTP_HOST) {
       ctx.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'SMTP_HOST obrigatório com MAIL_TRANSPORT=smtp' });
@@ -117,8 +97,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
 /** Estado das integrações externas, exibido em /health/ready e no painel da plataforma. */
 export function integrationStatus(env: Env) {
   return {
-    storage: env.STORAGE_DRIVER !== 'none',
-    antivirus: Boolean(env.CLAMAV_HOST),
     mail: env.MAIL_TRANSPORT !== 'none',
     mercadoPago: Boolean(env.MP_ACCESS_TOKEN && env.MP_WEBHOOK_SECRET),
     whatsappCloud: Boolean(env.META_APP_ID && env.META_APP_SECRET && env.META_WEBHOOK_VERIFY_TOKEN),

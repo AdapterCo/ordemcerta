@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { EncryptionService, randomNumericCode, safeEqual } from '../src/crypto';
-import { mapMpStatus } from '../src/mercadopago';
+import { mapMpStatus, mpDispute } from '../src/mercadopago';
 import { toCsv } from '../src/reports';
-import { sniffMime } from '../src/storage';
+import { isPng } from '../src/storage';
 import { renderPlaceholders, templateBodyParams } from '../src/templates';
 import { parseWhatsAppInbound, parseWhatsAppStatuses, WhatsAppCloudProvider } from '../src/whatsapp';
 import { createHmac } from 'node:crypto';
@@ -34,6 +34,14 @@ describe('integrações', () => {
     expect(mapMpStatus('in_process')).toBe('PENDING');
     expect(mapMpStatus('charged_back')).toBe('CHARGEBACK');
     expect(mapMpStatus('refunded')).toBe('REFUNDED');
+  });
+
+  it('classifica contestações (chargeback)', () => {
+    expect(mpDispute('approved', 'accredited')).toBe('NONE');
+    expect(mpDispute('in_mediation', null)).toBe('OPEN');
+    expect(mpDispute('charged_back', 'in_process')).toBe('OPEN');
+    expect(mpDispute('charged_back', 'settled')).toBe('LOST');
+    expect(mpDispute('charged_back', 'reimbursed')).toBe('WON');
   });
 
   it('valida assinatura do webhook da Meta (X-Hub-Signature-256)', () => {
@@ -85,9 +93,9 @@ describe('documentos e exportações', () => {
     expect(csv).toContain('"x;y"');
   });
 
-  it('detecta MIME real pelos magic bytes', () => {
-    expect(sniffMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe('image/jpeg');
-    expect(sniffMime(Buffer.from('%PDF-1.7 aaaaaaa'))).toBe('application/pdf');
-    expect(sniffMime(Buffer.from('<html><script>alert(1)</script>'))).toBeNull();
+  it('assinatura: aceita somente PNG real (magic bytes)', () => {
+    expect(isPng(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]))).toBe(true);
+    expect(isPng(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(false);
+    expect(isPng(Buffer.from('<html><script>alert(1)</script>'))).toBe(false);
   });
 });

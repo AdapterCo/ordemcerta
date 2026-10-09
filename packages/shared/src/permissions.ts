@@ -17,7 +17,6 @@ export const PERMISSIONS = [
   'os:deliver_override',
   'os:cancel',
   'os:reopen',
-  'os:files',
   'os:internal_notes',
   'os:unlock_secret',
   'quote:create',
@@ -70,7 +69,7 @@ export const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
   TENANT_ADMIN: ALL.filter((p) => p !== 'billing:manage'),
   MANAGER: [
     'os:view', 'os:create', 'os:update', 'os:assign', 'os:accept', 'os:diagnose', 'os:repair',
-    'os:approve_override', 'os:deliver', 'os:deliver_override', 'os:cancel', 'os:reopen', 'os:files',
+    'os:approve_override', 'os:deliver', 'os:deliver_override', 'os:cancel', 'os:reopen',
     'os:internal_notes', 'os:unlock_secret',
     'quote:create', 'quote:send', 'quote:approve_manual',
     'customer:view', 'customer:edit', 'customer:export',
@@ -84,7 +83,7 @@ export const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
     'messaging:view', 'audit:view',
   ],
   RECEPTIONIST: [
-    'os:view', 'os:create', 'os:update', 'os:deliver', 'os:files', 'os:internal_notes',
+    'os:view', 'os:create', 'os:update', 'os:deliver', 'os:internal_notes',
     'quote:create', 'quote:send',
     'customer:view', 'customer:edit',
     'product:view', 'stock:view',
@@ -94,7 +93,7 @@ export const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
     'messaging:view',
   ],
   TECHNICIAN: [
-    'os:view', 'os:accept', 'os:diagnose', 'os:repair', 'os:files', 'os:internal_notes', 'os:unlock_secret',
+    'os:view', 'os:accept', 'os:diagnose', 'os:repair', 'os:internal_notes', 'os:unlock_secret',
     'quote:create',
     'customer:view',
     'product:view', 'stock:view', 'stock:reserve',

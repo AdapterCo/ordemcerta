@@ -7,12 +7,12 @@ NAME="${1:?informe o nome do backup}"
 TARGET_DB="${2:-ordemcerta}"
 [[ "${3:-}" == "--confirm" ]] || { echo "Operação destrutiva. Repita com --confirm após confirmar backup atual."; exit 1; }
 : "${BACKUP_PASSPHRASE:?defina BACKUP_PASSPHRASE}"
-: "${BACKUP_S3_URI:?defina BACKUP_S3_URI}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/ordemcerta}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-aws s3 cp "$BACKUP_S3_URI/db/$NAME" "$WORK/b.gpg"
-aws s3 cp "$BACKUP_S3_URI/db/$NAME.sha256" "$WORK/b.sha256"
+cp "$BACKUP_DIR/db/$NAME" "$WORK/b.gpg"
+cp "$BACKUP_DIR/db/$NAME.sha256" "$WORK/b.sha256"
 [[ "$(sha256sum "$WORK/b.gpg" | awk '{print $1}')" == "$(cat "$WORK/b.sha256")" ]] || { echo "checksum inválido"; exit 2; }
 gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" -o "$WORK/b.dump" -d "$WORK/b.gpg"
 

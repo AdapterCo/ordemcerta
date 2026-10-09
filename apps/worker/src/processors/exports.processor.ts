@@ -6,7 +6,7 @@ import { Deps, isLastAttempt } from '../deps';
 
 const MONEY_KEYS = /cents|revenue|receipts|refunds|cogs|margin|total|discount|value|received_|supplies|withdrawals|difference/i;
 
-/** Exportações CSV/PDF assíncronas, escopadas ao tenant e às filiais do solicitante. */
+/** Exportações CSV/PDF assíncronas, escopadas ao tenant e às filiais do solicitante; arquivo guardado no banco por 7 dias. */
 @Injectable()
 export class ExportsProcessor implements OnModuleInit {
   constructor(private readonly deps: Deps) {}
@@ -16,13 +16,9 @@ export class ExportsProcessor implements OnModuleInit {
   }
 
   async build(job: Job<ExportJob>) {
-    const { db, storage } = this.deps;
+    const { db } = this.deps;
     const e = await db.reportExport.findFirst({ where: { id: job.data.exportId, tenantId: job.data.tenantId } });
     if (!e || e.status === 'DONE') return;
-    if (!storage) {
-      await db.reportExport.update({ where: { id: e.id }, data: { status: 'FAILED', error: 'Armazenamento: integração não configurada' } });
-      return;
-    }
     await db.reportExport.update({ where: { id: e.id }, data: { status: 'PROCESSING' } });
     try {
       const p = e.paramsJson as unknown as Omit<ReportFilters, 'from' | 'to'> & { from: string; to: string };
@@ -42,11 +38,10 @@ export class ExportsProcessor implements OnModuleInit {
         body = pdf.buffer;
         contentType = 'application/pdf';
       }
-      const key = `tenants/${e.tenantId}/exports/${e.id}.${e.format.toLowerCase()}`;
-      await storage.put(key, body, contentType);
+      // Guardado no banco até expirar (sem storage de objetos); a manutenção apaga o conteúdo depois.
       await db.reportExport.update({
         where: { id: e.id },
-        data: { status: 'DONE', storageKey: key, completedAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86_400_000), error: null },
+        data: { status: 'DONE', content: new Uint8Array(body), contentType, completedAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86_400_000), error: null },
       });
     } catch (err) {
       if (isLastAttempt(job)) await db.reportExport.update({ where: { id: e.id }, data: { status: 'FAILED', error: (err as Error).message.slice(0, 480) } });

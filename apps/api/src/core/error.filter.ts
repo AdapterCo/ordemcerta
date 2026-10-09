@@ -1,7 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Prisma } from '@prisma/client';
-import { BillingError, MessagingError, StorageNotConfiguredError, MercadoPagoNotConfiguredError } from '@ordemcerta/server';
+import { BillingError, MessagingError, MercadoPagoNotConfiguredError } from '@ordemcerta/server';
 import { ErrorCode, type ApiErrorBody } from '@ordemcerta/shared';
 import type { Request, Response } from 'express';
 import { ZodError } from 'zod';
@@ -39,9 +39,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (e instanceof DomainError) return { status: e.status, body: { code: e.code, message: e.message, details: e.details } };
     if (e instanceof BillingError) {
       return { status: BILLING_STATUS[e.code] ?? 400, body: { code: e.code, message: e.message, details: e.details } };
-    }
-    if (e instanceof StorageNotConfiguredError) {
-      return { status: 503, body: { code: ErrorCode.INTEGRATION_NOT_CONFIGURED, message: e.message } };
     }
     if (e instanceof MercadoPagoNotConfiguredError) {
       return { status: 503, body: { code: ErrorCode.INTEGRATION_NOT_CONFIGURED, message: e.message } };

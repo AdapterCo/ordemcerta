@@ -39,7 +39,7 @@ export class PlatformService {
       this.db.branch.count({ where: { status: 'ACTIVE' } }),
       this.db.user.count({ where: { status: 'ACTIVE', platformRole: null } }),
       this.db.billingWebhookEvent.count({ where: { status: { in: ['FAILED', 'DEAD'] } } }),
-      this.db.billingAuditLog.count({ where: { action: { in: ['payment_unmatched', 'payment_amount_mismatch', 'duplicate_payment_requires_refund'] }, createdAt: { gte: since } } }),
+      this.db.billingAuditLog.count({ where: { action: { in: ['payment_unmatched', 'payment_amount_mismatch', 'duplicate_payment_requires_refund', 'chargeback_lost_suspended'] }, createdAt: { gte: since } } }),
     ]);
     const jobs: Record<string, unknown> = {};
     for (const name of Object.values(QUEUES)) {
@@ -204,7 +204,7 @@ export class PlatformService {
 
   reconciliationIssues() {
     return this.db.billingAuditLog.findMany({
-      where: { action: { in: ['payment_unmatched', 'payment_amount_mismatch', 'duplicate_payment_requires_refund', 'proration_reversed_review_required', 'coverage_revoked'] } },
+      where: { action: { in: ['payment_unmatched', 'payment_amount_mismatch', 'duplicate_payment_requires_refund', 'proration_reversed_review_required', 'coverage_revoked', 'chargeback_dispute_open', 'chargeback_lost_suspended', 'chargeback_covered_by_provider', 'chargeback_dispute_won'] } },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });

@@ -1,7 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { AppPrisma, SystemPrisma, TenantDb } from './database';
 import { envProvider } from './env.provider';
-import { FilesController } from './files.controller';
 import { AuthResolver } from './guards';
 import { HealthController } from './health.controller';
 import { PlanLimitsService } from './plan-limits.service';
@@ -12,7 +11,6 @@ import {
   OutboxService,
   QueueService,
   RedisService,
-  StorageService,
   SubscriptionStateService,
 } from './services';
 import { RedisThrottlerStorage } from './throttler-redis.storage';
@@ -31,7 +29,6 @@ const providers = [
   QueueService,
   AuditService,
   OutboxService,
-  StorageService,
   SubscriptionStateService,
   PlanLimitsService,
   RealtimeGateway,
@@ -42,7 +39,7 @@ const providers = [
 
 @Global()
 @Module({
-  controllers: [HealthController, FilesController],
+  controllers: [HealthController],
   providers,
   exports: providers,
 })

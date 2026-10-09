@@ -4,7 +4,7 @@ SaaS multiempresa para assistências técnicas de celulares: recepção e ordens
 
 Produção: `https://ordemcerta.adapterco.com.br` (site, portal `/status` e API `/api/v1` no mesmo host, via Traefik).
 
-> **Situação real:** consulte [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md). Integrações externas (Mercado Pago, Meta/WhatsApp, SMTP, storage, antivírus) **não estão homologadas**: sem credenciais, o sistema responde "integração não configurada" e nunca simula sucesso.
+> **Situação real:** consulte [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md). Integrações externas (Mercado Pago, Meta/WhatsApp, SMTP) **não estão homologadas**: sem credenciais, o sistema responde "integração não configurada" e nunca simula sucesso.
 
 ## Stack
 
@@ -14,7 +14,7 @@ Produção: `https://ordemcerta.adapterco.com.br` (site, portal `/status` e API 
 | Web | React 19, Vite, TypeScript, React Router 7, TanStack Query, Tailwind 4, componentes estilo shadcn (Radix), React Hook Form + Zod |
 | API | NestJS 11, REST `/api/v1`, OpenAPI em `/api/docs`, Prisma 6, Socket.IO (adapter Redis) |
 | Worker | NestJS (application context) + BullMQ |
-| Dados | PostgreSQL 17 (RLS), Redis 7, S3 compatível (MinIO privado) |
+| Dados | PostgreSQL 17 (RLS), Redis 7 — sem storage de objetos (não guarda fotos; assinatura e exportações ficam no banco) |
 | PDF | pdfkit (A4 e térmico 80 mm) |
 
 ```
@@ -22,7 +22,7 @@ apps/{api,web,worker}  packages/{shared,server}  prisma/{schema.prisma,migration
 infra/{docker,traefik,backup}  docs/{architecture,api,permissions,states,runbooks,privacy}  tests/{integration,e2e}
 ```
 
-`packages/shared` (enums, RBAC, máquinas de estado, regras de dinheiro/billing, schemas Zod) é usado por API, worker e web. `packages/server` concentra adapters (Mercado Pago, WhatsApp Cloud API, storage, e-mail, antivírus), criptografia, PDFs, relatórios e o motor de billing.
+`packages/shared` (enums, RBAC, máquinas de estado, regras de dinheiro/billing, schemas Zod) é usado por API, worker e web. `packages/server` concentra adapters (Mercado Pago, WhatsApp Cloud API, e-mail), criptografia, PDFs, relatórios e o motor de billing.
 
 ## Requisitos
 
@@ -41,9 +41,9 @@ Copie `.env.example` para `.env` e preencha. Pontos críticos:
 ## Desenvolvimento local
 
 ```bash
-cp .env.example .env            # ajuste NODE_ENV=development, STORAGE_DRIVER=local, MAIL_TRANSPORT=console, COOKIE_SECURE=false, APP_URL=http://localhost:5173
+cp .env.example .env            # ajuste NODE_ENV=development, MAIL_TRANSPORT=console, COOKIE_SECURE=false, APP_URL=http://localhost:5173
 pnpm install --frozen-lockfile
-docker compose up -d postgres redis minio minio-init
+docker compose up -d postgres redis
 pnpm db:generate
 DATABASE_MIGRATION_URL=... pnpm db:migrate:deploy
 SEED_DEMO=true pnpm db:seed     # planos + empresa fictícia (demo.dono@ordemcerta.test / DemoOrdemCerta2026)
@@ -69,15 +69,13 @@ O CI (`.github/workflows/ci.yml`) cria os papéis, aplica as migrations do zero,
 3. Primeira instalação:
    ```bash
    docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis minio
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm minio-init
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis
    docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm migrate
    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api worker web
    ```
 4. Verifique `https://ordemcerta.adapterco.com.br/health/ready` e os logs.
-5. Antivírus opcional: `--profile antivirus` (defina `CLAMAV_HOST=clamav`).
 
-PostgreSQL, Redis e MinIO **não** são publicados no host; o compose não usa as portas 80/443/3000 do EasyPanel.
+PostgreSQL e Redis **não** são publicados no host; o compose não usa as portas 80/443/3000 do EasyPanel.
 
 ### Atualização e rollback
 
@@ -87,7 +85,7 @@ PostgreSQL, Redis e MinIO **não** são publicados no host; o compose não usa a
 
 ## Backup
 
-`infra/backup/backup.sh` (dump criptografado AES-256 + envio offsite + retenção), `restore.sh` (destrutivo, exige `--confirm`), `restore-test.sh` (restauração mensal em banco temporário).
+`infra/backup/backup.sh` (dump criptografado AES-256 em `BACKUP_DIR` na VPS + retenção; copie esse diretório para fora da VPS), `restore.sh` (destrutivo, exige `--confirm`), `restore-test.sh` (restauração mensal em banco temporário).
 
 ## Documentação
 

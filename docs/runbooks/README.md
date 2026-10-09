@@ -48,6 +48,7 @@ Prefixo de comando em produção: `DC="docker compose -f docker-compose.yml -f d
 - [ ] Backup + teste de restauração executados
 - [ ] Mercado Pago homologado (cartão, Pix, webhooks, cancelamento, alteração de valor, reconciliação) com credenciais de teste e depois de produção
 - [ ] Meta: app aprovado, webhook verificado, template aprovado, mensagem real entregue, faturamento próprio validado
-- [ ] SMTP com SPF/DKIM; antivírus ativo
+- [ ] SMTP com SPF/DKIM
+- [ ] Cópia de `BACKUP_DIR` para fora da VPS agendada
 - [ ] Termos de uso, privacidade, garantia e responsabilidade revisados juridicamente
 - [ ] Monitoramento/alertas (health, filas, erros 5xx, disco) e pentest orientado a multi-tenancy

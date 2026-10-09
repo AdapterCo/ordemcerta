@@ -26,7 +26,7 @@ export class TenantsService {
         where: { id: currentTenantId() },
         select: {
           id: true, name: true, legalName: true, document: true, status: true, timezone: true, phone: true, email: true,
-          address: true, primaryColor: true, logoStorageKey: true, onboardingCompletedAt: true, createdAt: true,
+          address: true, primaryColor: true, onboardingCompletedAt: true, createdAt: true,
         },
       }),
     );

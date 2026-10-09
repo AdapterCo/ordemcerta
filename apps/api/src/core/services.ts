@@ -2,13 +2,10 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   createQueue,
-  createStorage,
   EncryptionService,
   hashIp,
   redisConnection,
-  StorageNotConfiguredError,
   type QueueName,
-  type StorageProvider,
   type Tx,
 } from '@ordemcerta/server';
 import { isOperational, type SubscriptionSnapshot } from '@ordemcerta/shared';
@@ -145,21 +142,6 @@ export class OutboxService {
     });
     hooks.afterCommit(() => this.queues.add('outbox', 'dispatch', { eventId }, { removeOnComplete: true }));
     return eventId;
-  }
-}
-
-@Injectable()
-export class StorageService {
-  readonly provider: StorageProvider | null;
-  constructor(@Inject(ENV) private readonly env: AppEnv) {
-    this.provider = createStorage(env);
-  }
-  require(): StorageProvider {
-    if (!this.provider) throw new StorageNotConfiguredError();
-    return this.provider;
-  }
-  signedUrl(key: string, downloadName?: string) {
-    return this.require().signedUrl(key, this.env.SIGNED_URL_TTL_SECONDS, downloadName);
   }
 }
 
