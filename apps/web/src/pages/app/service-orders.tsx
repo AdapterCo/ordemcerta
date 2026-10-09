@@ -212,31 +212,47 @@ interface ChecklistItem {
   notes?: string;
 }
 
+const CHECK_OPTIONS = [
+  { value: true, label: 'OK', active: 'border-emerald-600 bg-emerald-600 text-white' },
+  { value: false, label: 'Com defeito', active: 'border-red-600 bg-red-600 text-white' },
+  { value: null, label: 'Não testado', active: 'border-slate-500 bg-slate-500 text-white' },
+] as const;
+
 export function ChecklistEditor({ items, onChange }: { items: ChecklistItem[]; onChange: (i: ChecklistItem[]) => void }) {
   return (
-    <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
-      {items.map((it, idx) => (
-        <div key={it.key} className="flex flex-wrap items-center gap-2 p-2 text-sm">
-          <span className="min-w-40 flex-1">{it.label}</span>
-          {([
-            [true, 'OK'],
-            [false, 'Falha'],
-            [null, 'N/T'],
-          ] as const).map(([v, l]) => (
-            <label key={l} className="inline-flex items-center gap-1">
-              <input type="radio" name={`chk-${it.key}`} checked={it.ok === v} onChange={() => onChange(items.map((x, i) => (i === idx ? { ...x, ok: v } : x)))} />
-              {l}
-            </label>
-          ))}
-          <input
-            aria-label={`Observação ${it.label}`}
-            className="h-8 w-full rounded border border-slate-300 px-2 sm:w-48"
-            placeholder="Observação"
-            value={it.notes ?? ''}
-            onChange={(e) => onChange(items.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))}
-          />
-        </div>
-      ))}
+    <div className="space-y-2">
+      <p className="text-xs text-slate-500">
+        Marque como o aparelho chegou: <strong>OK</strong> (funciona/sem avaria), <strong>Com defeito</strong> (descreva na observação) ou <strong>Não testado</strong> (não foi possível
+        verificar, ex.: aparelho não liga).
+      </p>
+      <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+        {items.map((it, idx) => (
+          <div key={it.key} className="flex flex-wrap items-center gap-2 p-2 text-sm">
+            <span className="min-w-40 flex-1 font-medium">{it.label}</span>
+            <div role="radiogroup" aria-label={it.label} className="inline-flex overflow-hidden rounded-md border border-slate-300">
+              {CHECK_OPTIONS.map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  role="radio"
+                  aria-checked={it.ok === o.value}
+                  className={`border-l border-slate-300 px-3 py-1.5 text-xs font-medium first:border-l-0 ${it.ok === o.value ? o.active : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                  onClick={() => onChange(items.map((x, i) => (i === idx ? { ...x, ok: o.value } : x)))}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <input
+              aria-label={`Observação ${it.label}`}
+              className={`h-8 w-full rounded border px-2 sm:w-56 ${it.ok === false && !it.notes ? 'border-red-400' : 'border-slate-300'}`}
+              placeholder={it.ok === false ? 'Descreva o defeito' : 'Observação (opcional)'}
+              value={it.notes ?? ''}
+              onChange={(e) => onChange(items.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)))}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

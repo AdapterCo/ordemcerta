@@ -183,6 +183,11 @@ export class SalesService {
         include: { items: true },
       });
       await this.audit.log(tx, { action: 'sale_confirmed', entity: 'sale', entityId: id, metadata: { totalCents: sale.totalCents } });
+      if (sale.orderId) {
+        await tx.serviceOrderEvent.create({
+          data: { tenantId, orderId: sale.orderId, actorId: auth().userId, eventType: 'sale_linked', payloadJson: { saleId: id, number: sale.number, totalCents: sale.totalCents } },
+        });
+      }
       await this.outbox.add(tx, hooks, tenantId, { eventType: 'sale.confirmed', aggregateType: 'sale', aggregateId: id, payload: { number: sale.number, totalCents: sale.totalCents } });
       return { sale: confirmed, changeCents: result.changeCents };
     });

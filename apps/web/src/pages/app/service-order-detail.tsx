@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { PAYMENT_METHODS, QUOTE_LINE_KINDS, lineTotalCents, type Permission, type TechnicalStatus } from '@ordemcerta/shared';
+import { ORDER_EVENT_LABELS, PAYMENT_METHODS, QUOTE_LINE_KINDS, lineTotalCents, statusLabel, type Permission, type TechnicalStatus } from '@ordemcerta/shared';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -237,7 +237,7 @@ function QuoteTab({ o }: { o: Order }) {
                 <Th>Item</Th>
                 <Th>Qtd</Th>
                 <Th>Unitário</Th>
-                <Th>Desconto</Th>
+                <Th>Desconto no item</Th>
                 <Th>Total</Th>
                 <Th>Garantia</Th>
               </tr>
@@ -269,33 +269,70 @@ function QuoteTab({ o }: { o: Order }) {
       {!quotable && !o.quotes.length && <Alert tone="blue">O orçamento é criado durante o diagnóstico.</Alert>}
       {editing && (
         <Card title="Novo orçamento">
-          <div className="space-y-2">
-            {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-2 gap-2 rounded border border-slate-200 p-2 sm:grid-cols-7">
-                <Select aria-label="Tipo" value={l.kind} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
-                  {QUOTE_LINE_KINDS.map((k) => (
-                    <option key={k} value={k}>
-                      {{ PART: 'Peça', LABOR: 'Mão de obra', SERVICE: 'Serviço', FEE: 'Taxa' }[k]}
-                    </option>
-                  ))}
-                </Select>
-                <Input aria-label="Descrição" className="col-span-2" value={l.description} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} />
-                <Input aria-label="Quantidade" type="number" min={1} value={l.qty} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, qty: Math.max(1, Number(e.target.value)) } : x)))} />
-                <MoneyInput value={l.unitPriceCents} onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, unitPriceCents: v } : x)))} />
-                <MoneyInput value={l.discountCents} onChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, discountCents: v } : x)))} />
-                <div className="flex gap-1">
-                  <Input aria-label="Garantia em dias" type="number" min={0} value={l.warrantyDays} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, warrantyDays: Number(e.target.value) } : x)))} />
-                  <Button variant="ghost" size="sm" aria-label="Remover linha" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
-                    ×
-                  </Button>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Liste o que será cobrado do cliente. O <strong>custo da peça</strong> é interno (não aparece para o cliente) e serve para calcular a sua margem.
+            </p>
+            {lines.map((l, i) => {
+              const set = (patch: Partial<Line>) => setLines(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+              return (
+                <div key={i} className="rounded-md border border-slate-200 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Item {i + 1}</span>
+                    <Button variant="ghost" size="sm" onClick={() => setLines(lines.filter((_, j) => j !== i))}>
+                      Remover item
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-6">
+                    <Field label="Tipo" htmlFor={`qk${i}`}>
+                      <Select id={`qk${i}`} value={l.kind} onChange={(e) => set({ kind: e.target.value })}>
+                        {QUOTE_LINE_KINDS.map((k) => (
+                          <option key={k} value={k}>
+                            {{ PART: 'Peça', LABOR: 'Mão de obra', SERVICE: 'Serviço', FEE: 'Taxa' }[k]}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Descrição (aparece para o cliente)" htmlFor={`qdesc${i}`} className="sm:col-span-3">
+                      <Input id={`qdesc${i}`} placeholder="Ex.: Tela original iPhone 13" value={l.description} onChange={(e) => set({ description: e.target.value })} />
+                    </Field>
+                    <Field label="Quantidade" htmlFor={`qq${i}`}>
+                      <Input id={`qq${i}`} type="number" min={1} value={l.qty} onChange={(e) => set({ qty: Math.max(1, Number(e.target.value)) })} />
+                    </Field>
+                    <Field label="Garantia (dias)" htmlFor={`qw${i}`}>
+                      <Input id={`qw${i}`} type="number" min={0} value={l.warrantyDays} onChange={(e) => set({ warrantyDays: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="Preço unitário para o cliente" htmlFor={`qp${i}`} className="sm:col-span-2">
+                      <MoneyInput id={`qp${i}`} value={l.unitPriceCents} onChange={(v) => set({ unitPriceCents: v })} />
+                    </Field>
+                    <Field label="Desconto neste item" htmlFor={`qld${i}`} hint="Opcional. Valor em R$ abatido só deste item" className="sm:col-span-2">
+                      <MoneyInput id={`qld${i}`} value={l.discountCents} onChange={(v) => set({ discountCents: v })} />
+                    </Field>
+                    {l.kind === 'PART' ? (
+                      <Field label="Custo unitário da peça (interno)" htmlFor={`qc${i}`} hint="Quanto a loja paga pela peça" className="sm:col-span-2">
+                        <MoneyInput id={`qc${i}`} value={l.unitCostCents} onChange={(v) => set({ unitCostCents: v })} />
+                      </Field>
+                    ) : (
+                      <div className="sm:col-span-2" />
+                    )}
+                  </div>
+                  <p className="mt-2 text-right text-sm">
+                    Total do item: <strong>{formatBRL(Math.max(l.qty * l.unitPriceCents - l.discountCents, 0))}</strong>
+                    {l.kind === 'PART' && l.unitCostCents > 0 && (
+                      <span className="ml-2 text-xs text-slate-500">· margem {formatBRL(l.qty * (l.unitPriceCents - l.unitCostCents) - l.discountCents)}</span>
+                    )}
+                  </p>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setLines([...lines, { kind: 'SERVICE', description: '', qty: 1, unitPriceCents: 0, unitCostCents: 0, discountCents: 0, warrantyDays: 90 }])}>
-                + Linha
+              <Button size="sm" variant="secondary" onClick={() => setLines([...lines, { kind: 'PART', description: '', qty: 1, unitPriceCents: 0, unitCostCents: 0, discountCents: 0, warrantyDays: 90 }])}>
+                + Peça
               </Button>
-              <Input aria-label="Buscar peça no catálogo" placeholder="Adicionar peça do catálogo…" className="h-8 max-w-64" value={productTerm} onChange={(e) => setProductTerm(e.target.value)} />
+              <Button size="sm" variant="secondary" onClick={() => setLines([...lines, { kind: 'SERVICE', description: '', qty: 1, unitPriceCents: 0, unitCostCents: 0, discountCents: 0, warrantyDays: 90 }])}>
+                + Serviço / mão de obra
+              </Button>
+              <Input aria-label="Buscar peça no catálogo" placeholder="Ou buscar peça do estoque…" className="h-8 max-w-64" value={productTerm} onChange={(e) => setProductTerm(e.target.value)} />
             </div>
             {products.data?.items.map((p) => (
               <button
@@ -310,19 +347,30 @@ function QuoteTab({ o }: { o: Order }) {
                 {p.name} — {formatBRL(p.priceCents)}
               </button>
             ))}
-            <div className="grid gap-2 sm:grid-cols-4">
-              <Field label="Desconto geral" htmlFor="qd">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Desconto no total do orçamento" htmlFor="qd" hint="Opcional. Abatido do valor final, além dos descontos por item">
                 <MoneyInput id="qd" value={discount} onChange={setDiscount} />
               </Field>
-              <Field label="Validade (dias)" htmlFor="qv">
+              <Field label="Orçamento válido por (dias)" htmlFor="qv">
                 <Input id="qv" type="number" min={1} max={60} value={meta.validDays} onChange={(e) => setMeta({ ...meta, validDays: Number(e.target.value) })} />
               </Field>
-              <Field label="Prazo estimado (dias)" htmlFor="qe">
+              <Field label="Prazo para o serviço (dias)" htmlFor="qe" hint="Após a aprovação">
                 <Input id="qe" type="number" min={0} value={meta.estimatedDays} onChange={(e) => setMeta({ ...meta, estimatedDays: Number(e.target.value) })} />
               </Field>
-              <div className="flex items-end text-right text-lg font-semibold">Total {formatBRL(Math.max(total, 0))}</div>
             </div>
-            <Textarea placeholder="Observações ao cliente" value={meta.notes} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} />
+            <dl className="ml-auto grid max-w-sm grid-cols-2 gap-1 rounded-md bg-slate-50 p-3 text-sm">
+              <dt className="text-slate-500">Soma dos itens</dt>
+              <dd className="text-right">{formatBRL(subtotal)}</dd>
+              <dt className="text-slate-500">Descontos nos itens</dt>
+              <dd className="text-right">− {formatBRL(lines.reduce((s, l) => s + l.discountCents, 0))}</dd>
+              <dt className="text-slate-500">Desconto no total</dt>
+              <dd className="text-right">− {formatBRL(discount)}</dd>
+              <dt className="font-semibold">Total para o cliente</dt>
+              <dd className="text-right text-lg font-semibold">{formatBRL(Math.max(total, 0))}</dd>
+            </dl>
+            <Field label="Observações para o cliente (opcional)" htmlFor="qn">
+              <Textarea id="qn" placeholder="Ex.: peça com previsão de chegada em 2 dias úteis" value={meta.notes} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} />
+            </Field>
             <div className="flex gap-2">
               <Button loading={create.isPending} disabled={!lines.length || total < 0} onClick={() => create.mutate()}>
                 Salvar versão
@@ -519,11 +567,53 @@ function PaymentTab({ o }: { o: Order }) {
           )}
         </Card>
       )}
-      {can('sales:create') && (
-        <Link to={`/app/sales/pos?orderId=${o.id}`}>
-          <Button variant="secondary">Vender acessórios vinculados a esta OS</Button>
-        </Link>
-      )}
+      <Card
+        title="Vendas vinculadas a esta OS"
+        actions={
+          can('sales:create') && (
+            <Link to={`/app/sales/pos?orderId=${o.id}`}>
+              <Button size="sm" variant="secondary">
+                Vender acessório para esta OS
+              </Button>
+            </Link>
+          )
+        }
+      >
+        {!o.linkedSales?.length ? (
+          <p className="text-sm text-slate-500">
+            Nenhuma venda vinculada. Use o botão para vender um acessório (película, capa, carregador…) ao cliente desta OS: a venda é feita no PDV, sai do estoque e fica registrada aqui.
+          </p>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Venda</Th>
+                <Th>Itens</Th>
+                <Th>Total</Th>
+                <Th>Situação</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {o.linkedSales.map((s: any) => (
+                <tr key={s.id}>
+                  <Td>
+                    nº {s.number}
+                    {s.confirmedAt && <span className="block text-xs text-slate-500">{formatDateTimeBR(s.confirmedAt)}</span>}
+                  </Td>
+                  <Td className="text-sm">{s.items.map((i: any) => `${i.qty}x ${i.description}`).join(', ')}</Td>
+                  <Td>{formatBRL(s.totalCents)}</Td>
+                  <Td>
+                    <Badge tone={s.status === 'CONFIRMED' ? 'green' : s.status === 'CANCELED' ? 'gray' : 'yellow'}>
+                      {{ CONFIRMED: 'Paga', CANCELED: 'Cancelada', REFUNDED: 'Estornada', PARTIALLY_REFUNDED: 'Estorno parcial' }[s.status as string] ?? s.status}
+                    </Badge>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        <p className="mt-2 text-xs text-slate-500">As vendas vinculadas são pagas no PDV, separadas da cobrança do serviço acima.</p>
+      </Card>
     </div>
   );
 }
@@ -733,7 +823,7 @@ export function ServiceOrderDetailPage() {
                         <ul className="space-y-1 text-sm">
                           {(c.itemsJson as any[]).map((it) => (
                             <li key={it.key}>
-                              {it.label}: <strong>{it.ok === null ? 'N/T' : it.ok ? 'OK' : 'Falha'}</strong>
+                              {it.label}: <strong className={it.ok === false ? 'text-red-700' : undefined}>{it.ok === null ? 'Não testado' : it.ok ? 'OK' : 'Com defeito'}</strong>
                               {it.notes ? ` — ${it.notes}` : ''}
                             </li>
                           ))}
@@ -755,10 +845,10 @@ export function ServiceOrderDetailPage() {
                       <ol className="space-y-2 text-sm">
                         {history.data?.map((e) => (
                           <li key={e.id} className="border-l-2 border-brand-600 pl-3">
-                            <p className="font-medium">{e.eventType.replaceAll('_', ' ')}</p>
+                            <p className="font-medium">{ORDER_EVENT_LABELS[e.eventType] ?? e.eventType.replaceAll('_', ' ')}</p>
                             <p className="text-xs text-slate-500">
                               {formatDateTimeBR(e.createdAt)} · {e.actorName ?? 'Sistema'}
-                              {e.toStatus ? ` · ${e.fromStatus ?? '—'} → ${e.toStatus}` : ''}
+                              {e.toStatus ? ` · ${statusLabel(e.fromStatus)} → ${statusLabel(e.toStatus)}` : ''}
                             </p>
                           </li>
                         ))}

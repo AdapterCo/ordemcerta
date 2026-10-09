@@ -95,6 +95,55 @@ export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
   RETURNED_UNREPAIRED: 'Devolvido sem reparo',
 };
 
+/** Rótulos em português dos eventos da linha do tempo da OS. */
+export const ORDER_EVENT_LABELS: Record<string, string> = {
+  created: 'OS aberta',
+  created_warranty_return: 'OS de retorno em garantia aberta',
+  accepted: 'OS aceita',
+  assigned: 'Técnico atribuído',
+  reassigned: 'Técnico alterado',
+  updated: 'Dados da OS alterados',
+  checklist_recorded: 'Checklist registrado',
+  intake_signed: 'Termo de recebimento assinado',
+  diagnosis_fee_informed: 'Taxa de diagnóstico informada',
+  diagnosis_started: 'Diagnóstico iniciado',
+  diagnosis_submitted: 'Diagnóstico concluído',
+  diagnosis_submitted_preapproved: 'Diagnóstico concluído (orçamento pré-aprovado)',
+  quote_created: 'Orçamento criado',
+  quote_sent: 'Orçamento enviado ao cliente',
+  quote_sent_awaiting_approval: 'Aguardando aprovação do orçamento',
+  quote_approved: 'Orçamento aprovado',
+  quote_rejected: 'Orçamento recusado',
+  parts_requested: 'Aguardando peças',
+  parts_arrived: 'Peças chegaram',
+  part_reserved: 'Peça reservada do estoque',
+  part_consumed: 'Baixa de peça do estoque',
+  part_purchased: 'Peça comprada para o serviço',
+  part_purchase_canceled: 'Compra de peça cancelada',
+  repair_started: 'Reparo iniciado',
+  testing_started: 'Testes iniciados',
+  repair_completed: 'Reparo concluído',
+  returned_unrepaired: 'Devolvido sem reparo',
+  delivered: 'Aparelho entregue',
+  reopened: 'OS reaberta',
+  canceled: 'OS cancelada',
+  note_added: 'Nota adicionada',
+  sale_linked: 'Venda vinculada à OS',
+  warranty_claim_opened: 'Solicitação de garantia aberta',
+  warranty_claim_updated: 'Solicitação de garantia atualizada',
+  warranty_return_opened: 'Retorno em garantia aberto',
+};
+
+/** Rótulo em português de um status técnico ou de entrega (para histórico/transições). */
+export function statusLabel(status: string | null | undefined): string {
+  if (!status) return '—';
+  return (
+    (TECHNICAL_STATUS_LABELS as Record<string, string>)[status] ??
+    (DELIVERY_STATUS_LABELS as Record<string, string>)[status] ??
+    status
+  );
+}
+
 export const OrderPaymentStatus = {
   UNBILLED: 'UNBILLED',
   UNPAID: 'UNPAID',

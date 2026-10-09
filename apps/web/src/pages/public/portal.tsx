@@ -1,3 +1,4 @@
+import { CheckCircle2, ClipboardCheck, PackageCheck, Wrench } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -15,6 +16,8 @@ interface PortalView {
     status: string;
     statusCode: string;
     delivery: string;
+    deliveryCode: string;
+    deliveredAt: string | null;
     receivedAt: string;
     estimatedDeliveryAt: string | null;
     warrantyUntil: string | null;
@@ -111,16 +114,93 @@ function QuoteDecision({ token, view, onDone }: { token: string; view: PortalVie
   );
 }
 
+const STEPS = ['Recebido', 'Avaliação', 'Aprovação', 'Reparo', 'Pronto', 'Entregue'] as const;
+
+/** Etapa atual na barra de progresso (null = fluxo encerrado sem reparo). */
+function currentStep(statusCode: string, deliveryCode: string): number | null {
+  if (deliveryCode === 'DELIVERED') return 5;
+  if (['REJECTED', 'CANCELED', 'RETURNED_UNREPAIRED'].includes(statusCode)) return null;
+  if (statusCode === 'READY') return 4;
+  if (['APPROVED', 'WAITING_PARTS', 'IN_REPAIR', 'TESTING'].includes(statusCode)) return 3;
+  if (statusCode === 'WAITING_QUOTE_APPROVAL') return 2;
+  if (['DIAGNOSING', 'REOPENED'].includes(statusCode)) return 1;
+  return 0;
+}
+
+function ProgressSteps({ step }: { step: number }) {
+  return (
+    <ol className="mt-4 grid grid-cols-6 gap-1" aria-label="Andamento do serviço">
+      {STEPS.map((label, i) => (
+        <li key={label} className="text-center">
+          <div className={`h-2 rounded-full ${i < step ? 'bg-brand-600' : i === step ? 'animate-pulse bg-brand-600' : 'bg-slate-200'}`} />
+          <span className={`mt-1 block text-[11px] leading-tight sm:text-xs ${i === step ? 'font-semibold text-brand-800' : i < step ? 'text-slate-700' : 'text-slate-400'}`}>{label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Destaque do momento que o cliente quer ver: reparo em andamento e pronto para retirada. */
+function StageHighlight({ view }: { view: PortalView }) {
+  const o = view.order;
+  if (o.deliveryCode === 'READY_FOR_PICKUP') {
+    const repaired = o.statusCode === 'READY';
+    return (
+      <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-5 text-center shadow-sm">
+        <PackageCheck className="mx-auto h-12 w-12 text-emerald-600" aria-hidden />
+        <p className="mt-2 text-2xl font-bold text-emerald-800">{repaired ? 'Seu aparelho está pronto!' : 'Seu aparelho está disponível para retirada'}</p>
+        <p className="mt-1 text-emerald-900">
+          Pode retirar na <strong>{view.company.branch}</strong>
+          {view.company.phone ? ` · ${view.company.phone}` : ''}.
+        </p>
+        <p className="mt-1 text-sm text-emerald-800">Leve este comprovante (ou o número da OS {o.number}) no momento da retirada.</p>
+      </div>
+    );
+  }
+  if (['IN_REPAIR', 'TESTING'].includes(o.statusCode)) {
+    return (
+      <div className="rounded-xl border-2 border-blue-500 bg-blue-50 p-5 text-center shadow-sm">
+        <Wrench className="mx-auto h-12 w-12 animate-pulse text-blue-600" aria-hidden />
+        <p className="mt-2 text-2xl font-bold text-blue-800">{o.statusCode === 'TESTING' ? 'Reparo feito, em testes finais' : 'Seu aparelho está em reparo'}</p>
+        <p className="mt-1 text-blue-900">Nosso técnico está trabalhando no seu aparelho agora. Avisaremos quando estiver pronto.</p>
+        {o.estimatedDeliveryAt && <p className="mt-1 text-sm text-blue-800">Previsão: {formatDateBR(o.estimatedDeliveryAt)}</p>}
+      </div>
+    );
+  }
+  if (o.statusCode === 'WAITING_QUOTE_APPROVAL') {
+    return (
+      <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-5 text-center">
+        <ClipboardCheck className="mx-auto h-10 w-10 text-amber-600" aria-hidden />
+        <p className="mt-2 text-xl font-bold text-amber-900">Precisamos da sua aprovação</p>
+        <p className="mt-1 text-amber-900">Confira o orçamento abaixo para liberarmos o reparo.</p>
+      </div>
+    );
+  }
+  if (o.deliveryCode === 'DELIVERED') {
+    return (
+      <div className="rounded-xl border border-slate-300 bg-slate-50 p-4 text-center">
+        <CheckCircle2 className="mx-auto h-10 w-10 text-slate-600" aria-hidden />
+        <p className="mt-2 text-lg font-semibold">Aparelho entregue{o.deliveredAt ? ` em ${formatDateBR(o.deliveredAt)}` : ''}</p>
+        {o.warrantyUntil && <p className="text-sm text-slate-600">Garantia até {formatDateBR(o.warrantyUntil)}</p>}
+      </div>
+    );
+  }
+  return null;
+}
+
 function PortalContent({ token, view, reload }: { token: string; view: PortalView; reload: () => void }) {
   const o = view.order;
+  const step = currentStep(o.statusCode, o.deliveryCode);
   return (
     <div className="space-y-4">
+      <StageHighlight view={view} />
       <Card title={`${view.company.name} — ${view.company.branch}`}>
         <p className="text-sm text-slate-500">Olá, {o.customerFirstName}!</p>
         <p className="mt-1 text-lg font-semibold">
           OS nº {o.number} · {o.device}
         </p>
         <p className="mt-2 inline-block rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-800">{o.status}</p>
+        {step !== null && <ProgressSteps step={step} />}
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <dt className="text-slate-500">Recebido em</dt>
           <dd>{formatDateTimeBR(o.receivedAt)}</dd>

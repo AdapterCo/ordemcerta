@@ -108,6 +108,8 @@ export class PublicService {
           status: PUBLIC_STATUS_LABELS[o.technicalStatus],
           statusCode: o.technicalStatus,
           delivery: DELIVERY_STATUS_LABELS[o.deliveryStatus],
+          deliveryCode: o.deliveryStatus,
+          deliveredAt: o.deliveredAt,
           receivedAt: o.receivedAt,
           estimatedDeliveryAt: o.estimatedDeliveryAt,
           warrantyUntil: o.warrantyUntil,

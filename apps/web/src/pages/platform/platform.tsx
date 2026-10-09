@@ -7,6 +7,58 @@ import { formatBRL, formatDateBR, formatDateTimeBR, SUBSCRIPTION_STATUS_LABELS }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+const INTEGRATION_LABELS: Record<string, string> = {
+  mail: 'E-mail (SMTP)',
+  mercadoPago: 'Mercado Pago',
+  whatsappCloud: 'WhatsApp Cloud API (Meta)',
+  whatsappEmbeddedSignup: 'WhatsApp — cadastro incorporado',
+};
+const QUEUE_LABELS: Record<string, string> = {
+  outbox: 'Eventos internos',
+  messaging: 'Mensagens de WhatsApp',
+  email: 'E-mails',
+  exports: 'Exportações de relatórios',
+  billing: 'Cobrança (Mercado Pago)',
+  maintenance: 'Manutenção automática',
+};
+const COUNT_LABELS: Array<[string, string]> = [
+  ['waiting', 'Aguardando'],
+  ['active', 'Em execução'],
+  ['delayed', 'Agendados'],
+  ['failed', 'Com falha'],
+  ['paused', 'Pausados'],
+];
+
+function QueueTable({ jobs }: { jobs: Record<string, Record<string, number> | { counts: Record<string, number> }> }) {
+  return (
+    <Table>
+      <thead>
+        <tr>
+          <Th>Fila</Th>
+          {COUNT_LABELS.map(([, l]) => (
+            <Th key={l}>{l}</Th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {Object.entries(jobs).map(([name, raw]) => {
+          const c = ('counts' in raw ? raw.counts : raw) as Record<string, number>;
+          return (
+            <tr key={name}>
+              <Td>{QUEUE_LABELS[name] ?? name}</Td>
+              {COUNT_LABELS.map(([k]) => (
+                <Td key={k} className={k === 'failed' && c[k] ? 'font-semibold text-red-700' : undefined}>
+                  {c[k] ?? 0}
+                </Td>
+              ))}
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  );
+}
+
 export function PlatformDashboardPage() {
   const q = useApi<any>(['pf-metrics'], '/platform/metrics', undefined, { refetchInterval: 60_000 });
   const settings = useApi<{ graceDays: number }>(['pf-settings'], '/platform/settings');
@@ -37,13 +89,13 @@ export function PlatformDashboardPage() {
               <ul className="grid gap-1 text-sm sm:grid-cols-3">
                 {Object.entries(m.integrations).map(([k, v]) => (
                   <li key={k}>
-                    {v ? '✅' : '⛔'} {k}
+                    {v ? '✅' : '⛔'} {INTEGRATION_LABELS[k] ?? k} <span className="text-xs text-slate-500">({v ? 'configurado' : 'não configurado'})</span>
                   </li>
                 ))}
               </ul>
             </Card>
-            <Card title="Filas">
-              <pre className="overflow-x-auto text-xs">{JSON.stringify(m.jobs, null, 2)}</pre>
+            <Card title="Filas de processamento">
+              <QueueTable jobs={m.jobs} />
             </Card>
           </>
         )}
@@ -434,11 +486,16 @@ export function PlatformJobsPage() {
   const retry = useAction(({ queue, id }: { queue: string; id: string }) => api(`/platform/jobs/${queue}/${id}/retry`, { method: 'POST' }), { success: 'Job reenfileirado', invalidate: [['pf-jobs']] });
   return (
     <div>
-      <PageHeader title="Jobs e DLQ" />
+      <PageHeader title="Filas de processamento" description="Tarefas em segundo plano (mensagens, e-mails, cobrança, relatórios). Falhas definitivas podem ser reprocessadas." />
       <QueryState loading={q.isLoading} error={q.error}>
         <div className="space-y-3">
+          {q.data && (
+            <Card title="Resumo">
+              <QueueTable jobs={q.data} />
+            </Card>
+          )}
           {Object.entries(q.data ?? {}).map(([name, v]) => (
-            <Card key={name} title={`${name} — ${JSON.stringify(v.counts)}`}>
+            <Card key={name} title={`Falhas — ${QUEUE_LABELS[name] ?? name}`}>
               {v.failed.length === 0 ? (
                 <p className="text-sm text-slate-500">Sem falhas</p>
               ) : (

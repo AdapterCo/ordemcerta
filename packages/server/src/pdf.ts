@@ -163,7 +163,7 @@ export async function buildServiceOrderPdf(data: ServiceOrderPdfData, format: Pd
   if (data.checklist.length) {
     section(doc, format, 'Estado físico e testes iniciais');
     for (const c of data.checklist) {
-      const mark = c.ok === null ? 'N/T' : c.ok ? 'OK' : 'Falha';
+      const mark = c.ok === null ? 'Não testado' : c.ok ? 'OK' : 'Com defeito';
       doc.text(`• ${t(c.label)}: ${mark}${c.notes ? ` — ${t(c.notes)}` : ''}`);
     }
   }

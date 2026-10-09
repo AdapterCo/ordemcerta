@@ -132,7 +132,17 @@ export function PosPage() {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="lg:col-span-2">
-        <PageHeader title="PDV" description={`${mySession?.register.name ?? ''}${orderId ? ' · venda vinculada à OS' : ''} · F2 buscar · F9 finalizar`} />
+        <PageHeader title="PDV" description={`${mySession?.register.name ?? ''} · F2 buscar · F9 finalizar`} />
+        {orderId && (
+          <div className="mb-3">
+            <Alert tone="blue" title="Venda vinculada a uma ordem de serviço">
+              Os itens desta venda ficam registrados na OS.{' '}
+              <Link className="underline" to={`/app/service-orders/${orderId}`}>
+                Voltar para a OS sem vender
+              </Link>
+            </Alert>
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -269,12 +279,18 @@ export function PosPage() {
         {done && (
           <div className="space-y-3">
             {done.changeCents > 0 && <p className="text-2xl font-bold">Troco: {formatBRL(done.changeCents)}</p>}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button onClick={() => void openPdf(`/sales/${done.id}/receipt`, { format: 'THERMAL' })}>Comprovante térmico</Button>
               <Button variant="secondary" onClick={() => void openPdf(`/sales/${done.id}/receipt`, { format: 'A4' })}>
                 A4
               </Button>
+              {orderId && (
+                <Link to={`/app/service-orders/${orderId}`}>
+                  <Button variant="secondary">Voltar para a OS</Button>
+                </Link>
+              )}
             </div>
+            {orderId && <p className="text-xs text-slate-500">Esta venda ficou registrada na OS (aba Pagamento → Vendas vinculadas).</p>}
           </div>
         )}
       </Dialog>

@@ -241,10 +241,10 @@ const PLATFORM_NAV = [
   { to: '/platform/plans', label: 'Planos' },
   { to: '/platform/subscriptions', label: 'Assinaturas' },
   { to: '/platform/invoices', label: 'Faturas' },
-  { to: '/platform/billing-events', label: 'Webhooks' },
+  { to: '/platform/billing-events', label: 'Notificações MP' },
   { to: '/platform/reconciliation', label: 'Reconciliação' },
   { to: '/platform/messaging', label: 'WhatsApp (faturamento)' },
-  { to: '/platform/jobs', label: 'Jobs' },
+  { to: '/platform/jobs', label: 'Filas de processamento' },
   { to: '/platform/audit', label: 'Auditoria' },
 ];
 

@@ -266,9 +266,25 @@ export class ServiceOrdersService {
       const users = await tx.tenantMembership.findMany({ where: { tenantId, userId: { in: [...new Set(userIds)] } }, select: { userId: true, user: { select: { name: true } } } });
       const names = Object.fromEntries(users.map((u) => [u.userId, u.user.name]));
       const receivable = await tx.receivable.findUnique({ where: { tenantId_sourceType_sourceId: { tenantId, sourceType: 'SERVICE_ORDER', sourceId: id } } });
+      // Vendas do PDV vinculadas a esta OS (acessórios etc.); rascunhos não finalizados ficam de fora.
+      const linkedSales = await tx.sale.findMany({
+        where: { tenantId, orderId: id, status: { not: 'DRAFT' } },
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          totalCents: true,
+          refundedCents: true,
+          confirmedAt: true,
+          items: { select: { id: true, description: true, qty: true, unitPriceCents: true, discountCents: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
       const { unlockSecrets, notes, ...rest } = o;
       return {
         ...rest,
+        linkedSales,
         device: this.customers.deviceView(o.device),
         notes: can('os:internal_notes') ? notes : notes.filter((n) => n.visibility === 'CUSTOMER'),
         hasUnlockSecret: unlockSecrets.length > 0,
