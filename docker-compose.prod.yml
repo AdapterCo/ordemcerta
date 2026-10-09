@@ -50,6 +50,13 @@ services:
       - traefik.http.routers.ordemcerta-web.tls=true
       - traefik.http.routers.ordemcerta-web.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
       - traefik.http.services.ordemcerta-web.loadbalancer.server.port=80
+      # HTTP → HTTPS
+      - traefik.http.routers.ordemcerta-http.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.ordemcerta-http.entrypoints=${TRAEFIK_HTTP_ENTRYPOINT:-http}
+      - traefik.http.routers.ordemcerta-http.middlewares=ordemcerta-https
+      - traefik.http.routers.ordemcerta-http.service=ordemcerta-web
+      - traefik.http.middlewares.ordemcerta-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.ordemcerta-https.redirectscheme.permanent=true
 
   oc-worker:
     mem_limit: 320m

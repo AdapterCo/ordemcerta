@@ -45,7 +45,11 @@ services:
     image: ordemcerta-api:${IMAGE_TAG:-latest}
     <<: *app-env
     working_dir: /app
-    command: ['sh', '-c', 'pnpm prisma migrate deploy && pnpm db:seed']
+    # Binários locais (sem pnpm/corepack em execução: a rede interna não tem saída para a internet).
+    command: ['sh', '-c', './node_modules/.bin/prisma migrate deploy && ./node_modules/.bin/tsx prisma/seed.ts']
+    environment:
+      CHECKPOINT_DISABLE: '1'
+      PRISMA_HIDE_UPDATE_MESSAGE: '1'
     depends_on:
       oc-postgres:
         condition: service_healthy

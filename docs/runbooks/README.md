@@ -6,7 +6,7 @@ Prefixo de comando em produção: `DC="docker compose -f docker-compose.yml -f d
 
 1. `./infra/backup/backup.sh` (confirme sucesso).
 2. `IMAGE_TAG=<nova> $DC build api worker web`
-3. `IMAGE_TAG=<nova> $DC run --rm migrate` — migrações backward-compatible (expand → deploy → contract em versões seguintes).
+3. `IMAGE_TAG=<nova> $DC run --rm oc-migrate` — migrações backward-compatible (expand → deploy → contract em versões seguintes).
 4. `IMAGE_TAG=<nova> $DC up -d api worker web`
 5. Verificar `/health/ready`, logs (`$DC logs -f api worker`) e um fluxo manual (login, listar OS).
 

@@ -79,7 +79,7 @@ PostgreSQL e Redis **não** são publicados no host; o compose não usa as porta
 
 ### Atualização e rollback
 
-- Imagens versionadas com `IMAGE_TAG`. Migrações são backward-compatible e rodam **antes** da troca de imagens, por job dedicado (`migrate`). Nunca `prisma db push` em produção.
+- Imagens versionadas com `IMAGE_TAG`. Migrações são backward-compatible e rodam **antes** da troca de imagens, por job dedicado (`oc-migrate`). Nunca `prisma db push` em produção.
 - Rollback: `IMAGE_TAG=<anterior> docker compose ... up -d oc-api oc-worker oc-web`. Detalhes em [`docs/runbooks`](docs/runbooks/README.md).
 - Nunca execute migração destrutiva sem backup recente e confirmação.
 
