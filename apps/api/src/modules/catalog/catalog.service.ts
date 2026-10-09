@@ -68,7 +68,7 @@ export class CatalogService {
           minStock: input.minStock,
           active: input.active,
           location: input.location,
-          compatibility: { create: input.compatibility.map((c) => ({ tenantId, brand: c.brand, model: c.model })) },
+          compatibility: { create: input.compatibility.map((c): Prisma.ProductCompatibilityUncheckedCreateWithoutProductInput => ({ brand: c.brand, model: c.model })) }, // tenantId herdado do produto
         },
       });
       await this.audit.log(tx, { action: 'product_created', entity: 'product', entityId: p.id });

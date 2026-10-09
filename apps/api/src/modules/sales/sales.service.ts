@@ -122,8 +122,8 @@ export class SalesService {
           status: 'DRAFT',
           ...totals,
           items: {
-            create: lines.map((l) => ({
-              tenantId,
+            // tenantId herdado da venda (FK composta [tenantId, saleId]); não repetir no item.
+            create: lines.map((l): Prisma.SaleItemUncheckedCreateWithoutSaleInput => ({
               productId: l.product.id,
               description: l.product.name,
               qty: l.qty,

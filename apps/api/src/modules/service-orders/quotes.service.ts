@@ -93,8 +93,8 @@ export class QuotesService {
           contentHash,
           createdBy: auth().userId,
           lines: {
-            create: lines.map((l) => ({
-              tenantId,
+            // tenantId herdado do orçamento (FK composta [tenantId, quoteId]); não repetir na linha.
+            create: lines.map((l): Prisma.QuoteLineUncheckedCreateWithoutQuoteInput => ({
               position: l.position,
               kind: l.kind,
               productId: l.productId,
