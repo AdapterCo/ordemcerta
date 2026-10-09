@@ -60,11 +60,34 @@ async function seedPlans() {
 async function seedSuperadmin() {
   const email = process.env.SEED_SUPERADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.SEED_SUPERADMIN_PASSWORD;
-  if (!email || !password) return;
+  if (!email || !password) {
+    console.log('superadmin NÃO criado: defina SEED_SUPERADMIN_EMAIL e SEED_SUPERADMIN_PASSWORD no .env');
+    return;
+  }
   if (password.length < 12) throw new Error('SEED_SUPERADMIN_PASSWORD deve ter ao menos 12 caracteres');
+  // Ajuda a detectar senha alterada pelo Docker Compose ("$" no .env é tratado como variável).
+  console.log(`superadmin ${email}: senha recebida com ${password.length} caracteres`);
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
-    console.log('superadmin já existe');
+    if (process.env.SEED_SUPERADMIN_RESET === 'true') {
+      // Redefinição explícita: nova senha, desbloqueio e MFA refeita no próximo login.
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          passwordHash: await hash(password, ARGON),
+          platformRole: 'PLATFORM_SUPERADMIN',
+          status: 'ACTIVE',
+          failedLoginCount: 0,
+          lockedUntil: null,
+          mfaEnabled: false,
+          mfaSecretEnc: null,
+        },
+      });
+      await prisma.session.updateMany({ where: { userId: existing.id, revokedAt: null }, data: { revokedAt: new Date(), revokeReason: 'superadmin_reset' } });
+      console.log(`superadmin ${email} redefinido (remova SEED_SUPERADMIN_RESET do .env)`);
+      return;
+    }
+    console.log('superadmin já existe (para redefinir a senha: SEED_SUPERADMIN_RESET=true)');
     return;
   }
   await prisma.user.create({
