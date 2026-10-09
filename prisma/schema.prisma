@@ -1072,6 +1072,7 @@ model ServiceOrder {
   warrantyClaims WarrantyClaim[]
   pickupReceipt  PickupReceipt?
   partPurchases  OrderPartPurchase[]
+  signatureCaptures SignatureCapture[]
   trackingTokens PublicTrackingToken[]
   otps           PublicOtp[]
   reservations   StockReservation[]
@@ -1168,6 +1169,28 @@ model ServiceOrderFile {
   @@unique([tenantId, id])
   @@index([tenantId, orderId])
   @@map("service_order_files")
+}
+
+/// Coleta de assinatura no celular do próprio cliente (QR code / link de uso único, 15 min).
+/// O token só existe em hash; a assinatura capturada é consumida uma única vez pelo termo.
+model SignatureCapture {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  orderId    String    @map("order_id") @db.Uuid
+  purpose    TermType
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  signerName String?   @map("signer_name") @db.VarChar(120)
+  content    Bytes?
+  capturedAt DateTime? @map("captured_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdBy  String    @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  order ServiceOrder @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict)
+
+  @@index([tenantId, orderId])
+  @@map("signature_captures")
 }
 
 /// Como a loja pagou a peça comprada para o serviço.

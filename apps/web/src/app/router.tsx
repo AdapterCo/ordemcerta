@@ -49,6 +49,7 @@ export const router = createBrowserRouter([
   { path: '/status', element: load(portal, 'StatusPage') },
   { path: '/status/:numero', element: load(portal, 'StatusPage') },
   { path: '/track/:token', element: load(portal, 'StatusPage') },
+  { path: '/assinar', element: load(portal, 'SignPage') },
   { path: '/quote', element: load(portal, 'QuotePage') },
   { path: '/quote/:token', element: load(portal, 'QuotePage') },
   {

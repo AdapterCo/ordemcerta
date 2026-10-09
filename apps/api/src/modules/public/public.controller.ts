@@ -1,7 +1,7 @@
 import { Controller, Get, Headers, HttpCode, Param, ParseIntPipe, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { publicLookupSchema, publicOtpRequestSchema, publicQuoteDecisionSchema, publicTokenSchema } from '@ordemcerta/shared';
+import { publicLookupSchema, publicOtpRequestSchema, publicQuoteDecisionSchema, publicSignatureSubmitSchema, publicTokenSchema } from '@ordemcerta/shared';
 import type { z } from 'zod';
 import { Public } from '../../core/decorators';
 import { Doc, ZBody } from '../../core/zod';
@@ -63,5 +63,20 @@ export class PublicController {
   @Doc('Recusa orçamento', { body: publicQuoteDecisionSchema })
   reject(@Param('id', ParseUUIDPipe) id: string, @ZBody(publicQuoteDecisionSchema) body: z.infer<typeof publicQuoteDecisionSchema>) {
     return this.portal.decide(body.token, id, 'reject', body);
+  }
+
+  @Post('signature/view')
+  @HttpCode(200)
+  @Doc('Termo a assinar no celular do cliente (link de uso único do QR code)', { body: publicTokenSchema })
+  signatureView(@ZBody(publicTokenSchema) body: z.infer<typeof publicTokenSchema>) {
+    return this.portal.signatureView(body.token);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('signature/submit')
+  @HttpCode(200)
+  @Doc('Envia a assinatura desenhada no celular do cliente', { body: publicSignatureSubmitSchema })
+  signatureSubmit(@ZBody(publicSignatureSubmitSchema) body: z.infer<typeof publicSignatureSubmitSchema>) {
+    return this.portal.signatureSubmit(body);
   }
 }

@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { randomNumericCode, sha256Hex, emailTemplate, renderPlaceholders } from '@ordemcerta/server';
+import { Inject, Injectable } from '@nestjs/common';
+import { isPng, MAX_SIGNATURE_BYTES, randomNumericCode, sha256Hex, emailTemplate, renderPlaceholders } from '@ordemcerta/server';
 import {
   DELIVERY_STATUS_LABELS,
   ErrorCode,
@@ -13,7 +13,8 @@ import { SystemPrisma, TenantDb } from '../../core/database';
 import { DomainError, Errors } from '../../core/errors';
 import { AuditService, CryptoService } from '../../core/services';
 import { SettingsService } from '../../core/settings.service';
-import { documentTemplate } from '../service-orders/order-helpers';
+import { ENV, type AppEnv } from '../../core/env.provider';
+import { documentTemplate, intakeTermText } from '../service-orders/order-helpers';
 import { QuotesService } from '../service-orders/quotes.service';
 
 /** Eventos exibidos na linha do tempo pública (sem laudos internos ou notas privadas). */
@@ -53,6 +54,7 @@ export class PublicService {
     private readonly settings: SettingsService,
     private readonly audit: AuditService,
     private readonly crypto: CryptoService,
+    @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
   private notFound() {
@@ -226,5 +228,70 @@ export class PublicService {
       });
       return { status: decision === 'approve' ? 'APPROVED' : 'REJECTED' };
     });
+  }
+
+  /* ------------------------------------------ assinatura no celular do cliente */
+
+  private async resolveCapture(token: string) {
+    const invalid = () => new DomainError(ErrorCode.TOKEN_INVALID, 'Link de assinatura inválido ou já utilizado. Peça à loja um novo QR code.', 404);
+    if (!token || token.length < 16 || token.length > 128) throw invalid();
+    const c = await this.system.signatureCapture.findUnique({ where: { tokenHash: sha256Hex(token) } });
+    if (!c || c.consumedAt) throw invalid();
+    if (c.expiresAt < new Date()) throw new DomainError(ErrorCode.TOKEN_INVALID, 'Este link de assinatura expirou. Peça à loja um novo QR code.', 410);
+    return c;
+  }
+
+  /** Termo exibido no celular do cliente antes de assinar (mesmo texto do hash do termo). */
+  async signatureView(token: string) {
+    const c = await this.resolveCapture(token);
+    return this.db.runFor(c.tenantId, async (tx) => {
+      const o = await tx.serviceOrder.findFirstOrThrow({
+        where: { id: c.orderId, tenantId: c.tenantId },
+        include: { device: { select: { brand: true, model: true } }, customer: { select: { name: true } }, branch: { select: { name: true } } },
+      });
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: c.tenantId }, select: { name: true } });
+      const text =
+        c.purpose === 'INTAKE'
+          ? (await intakeTermText(tx, c.tenantId, o.diagnosisFeeCents, this.env.APP_URL)).text
+          : (await documentTemplate(tx, c.tenantId, 'PICKUP_RECEIPT')).content;
+      return {
+        company: tenant.name,
+        branch: o.branch.name,
+        orderNumber: o.number,
+        device: `${o.device.brand} ${o.device.model}`,
+        purpose: c.purpose,
+        title: c.purpose === 'INTAKE' ? 'Termo de recebimento do aparelho' : 'Recibo de retirada do aparelho',
+        text,
+        suggestedName: o.customer.name,
+        alreadySigned: Boolean(c.capturedAt),
+        expiresAt: c.expiresAt,
+      };
+    });
+  }
+
+  /** Recebe a assinatura desenhada no celular; a loja usa no termo (uso único). */
+  async signatureSubmit(input: { token: string; signerName: string; signaturePng: string }) {
+    const c = await this.resolveCapture(input.token);
+    if (c.capturedAt) throw Errors.conflict('Este documento já foi assinado');
+    const buf = Buffer.from(input.signaturePng.replace(/^data:image\/png;base64,/, ''), 'base64');
+    if (!isPng(buf) || buf.length > MAX_SIGNATURE_BYTES) throw new DomainError(ErrorCode.FILE_REJECTED, 'Assinatura inválida', 422);
+    const ip = maybeCtx()?.ip;
+    await this.db.runFor(c.tenantId, async (tx) => {
+      const n = await tx.signatureCapture.updateMany({
+        where: { id: c.id, capturedAt: null },
+        data: { capturedAt: new Date(), content: new Uint8Array(buf), signerName: input.signerName },
+      });
+      if (!n.count) throw Errors.conflict('Este documento já foi assinado');
+      await this.audit.log(tx, {
+        tenantId: c.tenantId,
+        actorId: null,
+        actorType: 'CUSTOMER',
+        action: 'signature_captured_on_phone',
+        entity: 'signature_capture',
+        entityId: c.id,
+        metadata: { purpose: c.purpose, ipHash: this.crypto.ipHash(ip) },
+      });
+    });
+    return { ok: true };
   }
 }

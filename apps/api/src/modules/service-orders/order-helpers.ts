@@ -1,5 +1,5 @@
-import { DEFAULT_DOCUMENT_TEMPLATES, sha256Hex, type Tx } from '@ordemcerta/server';
-import type { DocumentTemplateType } from '@ordemcerta/shared';
+import { DEFAULT_DOCUMENT_TEMPLATES, renderPlaceholders, sha256Hex, type Tx } from '@ordemcerta/server';
+import { formatBRL, type DocumentTemplateType } from '@ordemcerta/shared';
 
 /**
  * Links públicos: o token vai no fragmento (#), que o navegador não envia ao
@@ -7,6 +7,18 @@ import type { DocumentTemplateType } from '@ordemcerta/shared';
  */
 export const trackingLink = (appUrl: string, number: number, token: string) => `${appUrl}/status/${number}#token=${token}`;
 export const quoteLink = (appUrl: string, token: string) => `${appUrl}/quote#token=${token}`;
+export const signatureLink = (appUrl: string, token: string) => `${appUrl}/assinar#token=${token}`;
+
+/**
+ * Texto do termo de recebimento (ficha + termo de responsabilidade) exatamente como
+ * assinado: o mesmo texto entra no hash do termo e é exibido no celular do cliente.
+ */
+export async function intakeTermText(tx: Tx, tenantId: string, diagnosisFeeCents: number, appUrl: string) {
+  const intake = await documentTemplate(tx, tenantId, 'INTAKE');
+  const resp = await documentTemplate(tx, tenantId, 'RESPONSIBILITY_TERM');
+  const vars = { taxa_diagnostico: diagnosisFeeCents ? formatBRL(diagnosisFeeCents) : 'sem taxa', link_consulta: `${appUrl}/status` };
+  return { text: `${renderPlaceholders(intake.content, vars)}\n\n${renderPlaceholders(resp.content, vars)}`, intake, resp };
+}
 
 /** Modelo versionado ativo da empresa, ou o padrão do sistema (versão 0). */
 export async function documentTemplate(tx: Tx, tenantId: string, type: DocumentTemplateType) {

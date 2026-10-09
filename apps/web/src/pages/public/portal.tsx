@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import { toast } from 'sonner';
 import { PublicLayout } from '@/components/layout';
-import { Alert, Button, Card, Field, Input, Spinner, Textarea } from '@/components/ui';
+import { SignaturePad } from '@/components/signature-pad';
+import { Alert, Button, Card, Checkbox, Field, Input, Spinner, Textarea } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatBRL, formatDateBR, formatDateTimeBR, fragmentParam } from '@/lib/utils';
 
@@ -351,6 +352,95 @@ export function QuotePage() {
       {error && <Alert tone="red">{error}</Alert>}
       {!view && !error && token && <Spinner />}
       {view && <PortalContent token={token} view={view} reload={() => void load()} />}
+    </PublicLayout>
+  );
+}
+
+interface SignView {
+  company: string;
+  branch: string;
+  orderNumber: number;
+  device: string;
+  purpose: 'INTAKE' | 'PICKUP';
+  title: string;
+  text: string;
+  suggestedName: string;
+  alreadySigned: boolean;
+}
+
+/** Assinatura no celular do cliente (aberta pelo QR code da loja; token no fragmento #). */
+export function SignPage() {
+  const token = fragmentParam('token');
+  const [view, setView] = useState<SignView | null>(null);
+  const [error, setError] = useState<string | null>(token ? null : 'Link inválido. Peça à loja um novo QR code.');
+  const [name, setName] = useState('');
+  const [agree, setAgree] = useState(false);
+  const [png, setPng] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    api<SignView>('/public/signature/view', { method: 'POST', body: { token } })
+      .then((v) => {
+        setView(v);
+        setName(v.suggestedName);
+        if (v.alreadySigned) setDone(true);
+      })
+      .catch((e) => setError(errorMessage(e)));
+  }, [token]);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await api('/public/signature/submit', { method: 'POST', body: { token, signerName: name, signaturePng: png } });
+      setDone(true);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <PublicLayout>
+      <div className="mx-auto max-w-lg space-y-4 py-4">
+        {error && <Alert tone="red">{error}</Alert>}
+        {!view && !error && <Spinner />}
+        {view && done && (
+          <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-6 text-center">
+            <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-600" aria-hidden />
+            <p className="mt-2 text-2xl font-bold text-emerald-800">Assinatura enviada!</p>
+            <p className="mt-1 text-emerald-900">A loja já recebeu. Obrigado, pode fechar esta página.</p>
+          </div>
+        )}
+        {view && !done && (
+          <>
+            <Card title={view.title}>
+              <p className="text-sm text-slate-500">
+                {view.company} · {view.branch}
+              </p>
+              <p className="mt-1 font-semibold">
+                OS nº {view.orderNumber} · {view.device}
+              </p>
+              <div className="mt-3 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{view.text}</div>
+            </Card>
+            <Card title="Sua assinatura">
+              <div className="space-y-3">
+                <Field label="Seu nome completo" htmlFor="sn">
+                  <Input id="sn" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+                </Field>
+                <SignaturePad height={200} onChange={setPng} />
+                <Checkbox id="agree" label="Li e concordo com o documento acima" checked={agree} onChange={setAgree} />
+                <Button className="w-full" size="lg" loading={busy} disabled={!png || !agree || name.trim().length < 3} onClick={() => void submit()}>
+                  Assinar e enviar
+                </Button>
+                <p className="text-xs text-slate-500">Assinatura eletrônica simples: registramos data, hora e o documento assinado.</p>
+              </div>
+            </Card>
+          </>
+        )}
+      </div>
     </PublicLayout>
   );
 }

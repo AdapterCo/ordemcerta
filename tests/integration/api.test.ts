@@ -248,6 +248,62 @@ describe('peça comprada para a OS', () => {
   });
 });
 
+describe('assinatura no celular do cliente', () => {
+  // PNG 1x1 válido (magic bytes conferidos pela API)
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+  it('QR → cliente assina no celular → loja registra o termo (uso único); papel também é aceito', async () => {
+    const F = await makeTenant('Assinatura');
+    const h = await new Http(base).login(F.ownerEmail);
+    const c = await h.req('POST', '/customers', { name: 'Ana Paula', phone: '11933332222' });
+    const newOrder = async () =>
+      (await h.req<any>('POST', '/service-orders', { branchId: F.branchId, customerId: c.body.id, device: { brand: 'Motorola', model: 'G84' }, reportedIssue: 'Não carrega' }, { 'Idempotency-Key': idem() })).body.order
+        .id as string;
+    const id = await newOrder();
+
+    const cap = await h.req<any>('POST', `/service-orders/${id}/signature-captures`, { purpose: 'INTAKE' });
+    expect(cap.status).toBe(201);
+    const token = new URL(cap.body.url).hash.replace('#token=', '');
+    expect(token.length).toBeGreaterThan(20);
+
+    const pub = new Http(base);
+    const view = await pub.req<any>('POST', '/public/signature/view', { token });
+    expect(view.status).toBe(200);
+    expect(view.body.title).toContain('recebimento');
+    expect(view.body.suggestedName).toBe('Ana Paula');
+    expect((await pub.req<any>('POST', '/public/signature/view', { token: 'x'.repeat(40) })).status).toBe(404);
+
+    expect((await h.req<any>('GET', `/service-orders/${id}/signature-captures/${cap.body.captureId}`)).body.status).toBe('PENDING');
+    expect((await pub.req('POST', '/public/signature/submit', { token, signerName: 'Ana Paula Souza', signaturePng: PNG })).status).toBe(200);
+    // segunda assinatura no mesmo link: recusada
+    expect((await pub.req('POST', '/public/signature/submit', { token, signerName: 'Outra', signaturePng: PNG })).status).toBe(409);
+    const st = await h.req<any>('GET', `/service-orders/${id}/signature-captures/${cap.body.captureId}`);
+    expect(st.body.status).toBe('CAPTURED');
+    expect(st.body.signerName).toBe('Ana Paula Souza');
+    expect(st.body.previewPng).toMatch(/^data:image\/png;base64,/);
+
+    const term = await h.req<any>('POST', `/service-orders/${id}/intake-signature`, { signerName: 'Atendente digitou', signatureCaptureId: cap.body.captureId, accepted: true });
+    expect(term.status).toBe(201);
+    expect(term.body.signerName).toBe('Ana Paula Souza');
+    expect(term.body.signatureFileId).toBeTruthy();
+    expect((term.body.evidenceJson as any).method).toBe('assinatura_no_celular_do_cliente');
+    // a mesma assinatura não serve para outro termo
+    expect((await h.req('POST', `/service-orders/${id}/intake-signature`, { signerName: 'X', signatureCaptureId: cap.body.captureId, accepted: true })).status).toBe(409);
+    // link consumido não abre mais
+    expect((await pub.req('POST', '/public/signature/view', { token })).status).toBe(404);
+
+    // ficha impressa: sem imagem, método registrado
+    const id2 = await newOrder();
+    const paper = await h.req<any>('POST', `/service-orders/${id2}/intake-signature`, { signerName: 'Ana Paula', paper: true, accepted: true });
+    expect(paper.status).toBe(201);
+    expect(paper.body.signatureFileId).toBeNull();
+    expect((paper.body.evidenceJson as any).method).toBe('assinatura_em_papel_na_ficha_impressa');
+    // nenhuma forma ou duas formas: inválido
+    expect((await h.req('POST', `/service-orders/${id2}/intake-signature`, { signerName: 'Ana', accepted: true })).status).toBe(422);
+    expect((await h.req('POST', `/service-orders/${id2}/intake-signature`, { signerName: 'Ana', paper: true, signaturePng: PNG, accepted: true })).status).toBe(422);
+  });
+});
+
 describe('fluxo completo da OS', () => {
   it('recepção → diagnóstico → orçamento → aprovação → reparo → baixa de peça → conclusão → pagamento → entrega → PDF', async () => {
     const F = await makeTenant('Fluxo');

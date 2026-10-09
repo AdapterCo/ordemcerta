@@ -5971,6 +5971,10 @@
                     "maxLength": 500000,
                     "pattern": "^data:image\\/png;base64,[A-Za-z0-9+/=]+$"
                   },
+                  "signatureCaptureId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "overrideUnpaid": {
                     "type": "boolean",
                     "default": false
@@ -6150,6 +6154,13 @@
                     "maxLength": 500000,
                     "pattern": "^data:image\\/png;base64,[A-Za-z0-9+/=]+$"
                   },
+                  "signatureCaptureId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "paper": {
+                    "type": "boolean"
+                  },
                   "accepted": {
                     "type": "boolean",
                     "enum": [
@@ -6159,7 +6170,6 @@
                 },
                 "required": [
                   "signerName",
-                  "signaturePng",
                   "accepted"
                 ],
                 "additionalProperties": false
@@ -6315,6 +6325,247 @@
           }
         ],
         "summary": "Adiciona nota (interna ou visível ao cliente)",
+        "tags": [
+          "service-orders"
+        ]
+      }
+    },
+    "/api/v1/service-orders/{id}/signature-captures": {
+      "post": {
+        "operationId": "ServiceOrdersController_createSignatureCapture",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "INTAKE",
+                      "PICKUP"
+                    ]
+                  }
+                },
+                "required": [
+                  "purpose"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Gera QR code/link de uso único (15 min) para o cliente assinar no próprio celular",
+        "tags": [
+          "service-orders"
+        ]
+      }
+    },
+    "/api/v1/service-orders/{id}/signature-captures/{captureId}": {
+      "get": {
+        "operationId": "ServiceOrdersController_signatureCaptureStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "captureId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Andamento da assinatura no celular do cliente",
+        "tags": [
+          "service-orders"
+        ]
+      }
+    },
+    "/api/v1/service-orders/{id}/part-purchases": {
+      "post": {
+        "operationId": "ServiceOrdersController_purchasePart",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "qty": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 999
+                  },
+                  "unitCostCents": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "supplierName": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "nullable": true
+                  },
+                  "paymentMethod": {
+                    "type": "string",
+                    "enum": [
+                      "CASH_REGISTER",
+                      "CASH_OTHER",
+                      "PIX",
+                      "DEBIT_CARD",
+                      "CREDIT_CARD",
+                      "BANK_SLIP",
+                      "ON_CREDIT",
+                      "OTHER"
+                    ]
+                  },
+                  "cashSessionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "purchasedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "description",
+                  "qty",
+                  "unitCostCents",
+                  "paymentMethod"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registra peça comprada para a OS (custo, fornecedor, forma de pagamento; dinheiro do caixa gera sangria)",
+        "tags": [
+          "service-orders"
+        ]
+      }
+    },
+    "/api/v1/service-orders/{id}/part-purchases/{purchaseId}/cancel": {
+      "post": {
+        "operationId": "ServiceOrdersController_cancelPartPurchase",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "purchaseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancela compra de peça (estorna custo e, se pago pelo caixa, devolve ao caixa aberto)",
         "tags": [
           "service-orders"
         ]
@@ -7093,6 +7344,90 @@
           }
         },
         "summary": "Recusa orçamento",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/api/v1/public/signature/view": {
+      "post": {
+        "operationId": "PublicController_signatureView",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Termo a assinar no celular do cliente (link de uso único do QR code)",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/api/v1/public/signature/submit": {
+      "post": {
+        "operationId": "PublicController_signatureSubmit",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 200
+                  },
+                  "signerName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "signaturePng": {
+                    "type": "string",
+                    "maxLength": 500000,
+                    "pattern": "^data:image\\/png;base64,[A-Za-z0-9+/=]+$"
+                  }
+                },
+                "required": [
+                  "token",
+                  "signerName",
+                  "signaturePng"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Envia a assinatura desenhada no celular do cliente",
         "tags": [
           "public"
         ]

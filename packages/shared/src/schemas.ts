@@ -333,14 +333,18 @@ export const completeRepairSchema = versionSchema.extend({
   technicalReport: optionalText(8000),
   warrantyDays: z.number().int().min(0).max(3650).optional(),
 });
+/** Assinatura desenhada na tela (PNG em data URL). */
+const signaturePngSchema = z
+  .string()
+  .max(500_000)
+  .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
+
 export const deliverSchema = versionSchema.extend({
   receivedByName: trimmed(120),
   receivedByDocument: optionalText(20),
-  signaturePng: z
-    .string()
-    .max(500_000)
-    .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/)
-    .optional(),
+  signaturePng: signaturePngSchema.optional(),
+  /** Assinatura coletada no celular do cliente (QR code). */
+  signatureCaptureId: uuid.optional(),
   overrideUnpaid: z.boolean().default(false),
   overrideReason: z.string().trim().max(500).optional(),
 });
@@ -348,11 +352,26 @@ export const cancelSchema = versionSchema.extend({ reason: trimmed(500) });
 export const reopenSchema = versionSchema.extend({ reason: trimmed(500) });
 export const checklistSchema = z.object({ phase: z.enum(['INTAKE', 'POST_REPAIR']), items: z.array(checklistItemSchema).min(1).max(60) });
 export const noteSchema = z.object({ text: trimmed(4000), visibility: z.enum(['INTERNAL', 'CUSTOMER']).default('INTERNAL') });
-export const intakeSignatureSchema = z.object({
+/** Termo de recebimento: assinatura na tela, no celular do cliente (QR) ou na ficha impressa. */
+export const intakeSignatureSchema = z
+  .object({
+    signerName: trimmed(120),
+    signerDocument: optionalText(20),
+    signaturePng: signaturePngSchema.optional(),
+    signatureCaptureId: uuid.optional(),
+    paper: z.boolean().optional(),
+    accepted: z.literal(true),
+  })
+  .refine((v) => [Boolean(v.signaturePng), Boolean(v.signatureCaptureId), v.paper === true].filter(Boolean).length === 1, {
+    message: 'Escolha uma forma de assinatura',
+  });
+
+/** QR code / link para o cliente assinar no próprio celular. */
+export const signatureCaptureCreateSchema = z.object({ purpose: z.enum(['INTAKE', 'PICKUP']) });
+export const publicSignatureSubmitSchema = z.object({
+  token: z.string().min(20).max(200),
   signerName: trimmed(120),
-  signerDocument: optionalText(20),
-  signaturePng: z.string().max(500_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/),
-  accepted: z.literal(true),
+  signaturePng: signaturePngSchema,
 });
 
 /* --------------------------------------------------------------- orçamentos */

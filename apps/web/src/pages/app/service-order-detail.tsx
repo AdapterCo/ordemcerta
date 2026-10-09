@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { DeliveryBadge, QueryState, StatusBadge, useAction, useApi } from '@/components/data';
-import { SignaturePad } from '@/components/signature-pad';
+import { SignatureCollector, type SignatureValue } from '@/components/signature-collector';
 import { Alert, Badge, Button, Card, Checkbox, ConfirmDialog, Dialog, Field, Input, MoneyInput, PageHeader, Select, Table, Tabs, Td, Textarea, Th } from '@/components/ui';
 import { api, errorMessage, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -797,13 +797,19 @@ function DeliveryCard({ o }: { o: Order }) {
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ receivedByName: o.customer.name, receivedByDocument: '', overrideUnpaid: false, overrideReason: '' });
-  const [signature, setSignature] = useState<string | null>(null);
+  const [signature, setSignature] = useState<SignatureValue | null>(null);
   const deliver = useAction(
     (_: void, key) =>
       api(`/service-orders/${o.id}/deliver`, {
         method: 'POST',
         idempotencyKey: key,
-        body: { version: o.version, ...form, receivedByDocument: form.receivedByDocument || null, signaturePng: signature ?? undefined },
+        body: {
+          version: o.version,
+          ...form,
+          receivedByDocument: form.receivedByDocument || null,
+          signatureCaptureId: signature?.kind === 'capture' ? signature.captureId : undefined,
+          signaturePng: signature?.kind === 'screen' ? signature.png : undefined,
+        },
       }),
     { success: 'Entrega registrada', invalidate: [['os', o.id], ['service-orders']], onSuccess: () => setOpen(false) },
   );
@@ -843,7 +849,57 @@ function DeliveryCard({ o }: { o: Order }) {
               {form.overrideUnpaid && <Textarea aria-label="Motivo da liberação" placeholder="Motivo da liberação" value={form.overrideReason} onChange={(e) => setForm({ ...form, overrideReason: e.target.value })} />}
             </div>
           )}
-          <SignaturePad onChange={setSignature} />
+          <div>
+            <p className="mb-2 text-sm font-medium">Assinatura de quem retira</p>
+            {open && <SignatureCollector orderId={o.id} purpose="PICKUP" paperLabel="Assinou o recibo de retirada impresso" onChange={setSignature} />}
+          </div>
+        </div>
+      </Dialog>
+    </>
+  );
+}
+
+/* --------------------------------------------- termo de recebimento (depois) */
+
+/** Colhe a assinatura do termo de recebimento quando não foi feita na abertura da OS. */
+function IntakeSignButton({ o }: { o: Order }) {
+  const [open, setOpen] = useState(false);
+  const [signature, setSignature] = useState<SignatureValue | null>(null);
+  const [signer, setSigner] = useState(o.customer.name as string);
+  const sign = useAction(
+    (_: void) =>
+      api(`/service-orders/${o.id}/intake-signature`, {
+        method: 'POST',
+        body: {
+          signerName: signature?.kind === 'capture' ? signature.signerName || signer : signer,
+          accepted: true,
+          ...(signature?.kind === 'capture' ? { signatureCaptureId: signature.captureId } : signature?.kind === 'screen' ? { signaturePng: signature.png } : { paper: true }),
+        },
+      }),
+    { success: 'Termo de recebimento registrado', invalidate: [['os', o.id], ['os-history', o.id]], onSuccess: () => setOpen(false) },
+  );
+  return (
+    <>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+        Colher assinatura do termo
+      </Button>
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Assinatura do termo de recebimento"
+        footer={
+          <Button loading={sign.isPending} disabled={!signature || (signature.kind !== 'capture' && signer.trim().length < 3)} onClick={() => sign.mutate()}>
+            Registrar termo
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          {open && <SignatureCollector orderId={o.id} purpose="INTAKE" paperLabel="Cliente assinou a ficha impressa" onChange={setSignature} />}
+          {signature?.kind !== 'capture' && (
+            <Field label="Nome de quem assina" htmlFor="isn">
+              <Input id="isn" value={signer} onChange={(e) => setSigner(e.target.value)} />
+            </Field>
+          )}
         </div>
       </Dialog>
     </>
@@ -988,7 +1044,14 @@ export function ServiceOrderDetailPage() {
                       <p className="mt-2 text-sm">
                         <strong>Acessórios:</strong> {q.data.accessories.filter((a: any) => a.received).map((a: any) => `${ACCESSORY_LABELS[a.type as keyof typeof ACCESSORY_LABELS]}${a.description ? ` (${a.description})` : ''}`).join(', ') || 'nenhum'}
                       </p>
-                      <p className="mt-2 text-xs text-slate-500">{q.data.terms.some((t: any) => t.termType === 'INTAKE') ? 'Termo de recebimento assinado' : 'Termo de recebimento ainda não assinado'}</p>
+                      {q.data.terms.some((t: any) => t.termType === 'INTAKE') ? (
+                        <p className="mt-2 text-xs text-slate-500">Termo de recebimento assinado</p>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-amber-700">Termo de recebimento ainda não assinado</span>
+                          {can('os:create') && <IntakeSignButton o={q.data} />}
+                        </div>
+                      )}
                       {q.data.warrantyUntil && <p className="text-sm">Garantia até {formatDateBR(q.data.warrantyUntil)}</p>}
                     </Card>
                     {q.data.checklists.map((c: any) => (

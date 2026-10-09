@@ -7,7 +7,7 @@ import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import type { z } from 'zod';
 import { DeliveryBadge, Pagination, PRIORITY_TONE, QueryState, StatusBadge, useAction, useApi, useUrlFilters } from '@/components/data';
-import { SignaturePad } from '@/components/signature-pad';
+import { SignatureCollector, type SignatureValue } from '@/components/signature-collector';
 import { Alert, Badge, Button, Card, Checkbox, Dialog, Field, Input, MoneyInput, PageHeader, Select, Table, Td, Textarea, Th } from '@/components/ui';
 import { api, errorMessage, openPdf, type Paginated } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -289,7 +289,8 @@ export function NewServiceOrderPage() {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [created, setCreated] = useState<Created | null>(null);
   const [qr, setQr] = useState<string | null>(null);
-  const [signature, setSignature] = useState<string | null>(null);
+  const [signature, setSignature] = useState<SignatureValue | null>(null);
+  const [signed, setSigned] = useState(false);
   const [signer, setSigner] = useState('');
 
   useEffect(() => {
@@ -334,8 +335,16 @@ export function NewServiceOrderPage() {
   );
 
   const sign = useAction(
-    (_: void) => api(`/service-orders/${created!.order.id}/intake-signature`, { method: 'POST', body: { signerName: signer, signaturePng: signature, accepted: true } }),
-    { success: 'Termo de recebimento assinado' },
+    (_: void) =>
+      api(`/service-orders/${created!.order.id}/intake-signature`, {
+        method: 'POST',
+        body: {
+          signerName: signature?.kind === 'capture' ? signature.signerName || signer : signer,
+          accepted: true,
+          ...(signature?.kind === 'capture' ? { signatureCaptureId: signature.captureId } : signature?.kind === 'screen' ? { signaturePng: signature.png } : { paper: true }),
+        },
+      }),
+    { success: 'Termo de recebimento registrado', onSuccess: () => setSigned(true) },
   );
 
   if (!branchId) return <Alert tone="red">Nenhuma filial disponível. Cadastre uma filial em Configurações.</Alert>;
@@ -479,14 +488,24 @@ export function NewServiceOrderPage() {
             </div>
             <div className="space-y-2">
               <p className="text-sm font-medium">Assinatura do termo de recebimento</p>
-              <Field label="Nome de quem assina" htmlFor="signer">
-                <Input id="signer" value={signer} onChange={(e) => setSigner(e.target.value)} />
-              </Field>
-              <SignaturePad onChange={setSignature} />
-              <p className="text-xs text-slate-500">Assinatura eletrônica simples, com hash do termo e evidências registradas.</p>
-              <Button disabled={!signature || signer.length < 3} loading={sign.isPending} onClick={() => sign.mutate()}>
-                Registrar assinatura
-              </Button>
+              {signed ? (
+                <Alert tone="green" title="Termo de recebimento registrado">
+                  A assinatura ficou vinculada a esta OS.
+                </Alert>
+              ) : (
+                <>
+                  <SignatureCollector orderId={created.order.id} purpose="INTAKE" paperLabel="Cliente assinou a ficha impressa" onChange={setSignature} />
+                  {signature?.kind !== 'capture' && (
+                    <Field label="Nome de quem assina" htmlFor="signer">
+                      <Input id="signer" value={signer} onChange={(e) => setSigner(e.target.value)} />
+                    </Field>
+                  )}
+                  <p className="text-xs text-slate-500">Assinatura eletrônica simples, com hash do termo e evidências registradas.</p>
+                  <Button disabled={!signature || (signature.kind !== 'capture' && signer.length < 3)} loading={sign.isPending} onClick={() => sign.mutate()}>
+                    Registrar termo
+                  </Button>
+                </>
+              )}
             </div>
             <div className="sm:col-span-2">
               <Button className="w-full" onClick={() => navigate(`/app/service-orders/${created.order.id}`)}>

@@ -13,6 +13,7 @@ import {
   partPurchaseSchema,
   reopenSchema,
   serviceOrderQuerySchema,
+  signatureCaptureCreateSchema,
   submitDiagnosisSchema,
   transitionSchema,
   updateServiceOrderSchema,
@@ -24,6 +25,7 @@ import { Idempotent, Operational, Perm } from '../../core/decorators';
 import { Doc, ZBody, ZQuery } from '../../core/zod';
 import { OrderDocumentsService } from './order-documents.service';
 import { OrderPartsService } from './order-parts.service';
+import { OrderSignaturesService } from './order-signatures.service';
 import { ServiceOrdersService } from './service-orders.service';
 
 const reasonSchema = z.object({ reason: z.string().trim().min(5).max(300) });
@@ -37,6 +39,7 @@ export class ServiceOrdersController {
     private readonly orders: ServiceOrdersService,
     private readonly docs: OrderDocumentsService,
     private readonly parts: OrderPartsService,
+    private readonly signatures: OrderSignaturesService,
   ) {}
 
   @Get()
@@ -231,6 +234,20 @@ export class ServiceOrdersController {
   @Doc('Adiciona nota (interna ou visível ao cliente)', { body: noteSchema })
   note(@Param('id', ParseUUIDPipe) id: string, @ZBody(noteSchema) body: z.infer<typeof noteSchema>) {
     return this.orders.addNote(id, body);
+  }
+
+  @Post(':id/signature-captures')
+  @Perm('os:view')
+  @Doc('Gera QR code/link de uso único (15 min) para o cliente assinar no próprio celular', { body: signatureCaptureCreateSchema })
+  createSignatureCapture(@Param('id', ParseUUIDPipe) id: string, @ZBody(signatureCaptureCreateSchema) body: z.infer<typeof signatureCaptureCreateSchema>) {
+    return this.signatures.createCapture(id, body.purpose);
+  }
+
+  @Get(':id/signature-captures/:captureId')
+  @Perm('os:view')
+  @Doc('Andamento da assinatura no celular do cliente')
+  signatureCaptureStatus(@Param('id', ParseUUIDPipe) id: string, @Param('captureId', ParseUUIDPipe) captureId: string) {
+    return this.signatures.captureStatus(id, captureId);
   }
 
   @Post(':id/part-purchases')

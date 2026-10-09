@@ -33,7 +33,7 @@ import { SettingsService } from '../../core/settings.service';
 import { CustomersService } from '../customers/customers.service';
 import { FinanceService } from '../finance/finance.service';
 import { StockService } from '../stock/stock.service';
-import { documentTemplate, trackingLink } from './order-helpers';
+import { documentTemplate, intakeTermText, trackingLink } from './order-helpers';
 import { OrderSignaturesService } from './order-signatures.service';
 
 type Transition = {
@@ -463,12 +463,23 @@ export class ServiceOrdersService {
     return this.db.run(async (tx) => {
       const o = await this.load(tx, id);
       const tenantId = o.tenantId;
-      const intake = await documentTemplate(tx, tenantId, 'INTAKE');
-      const resp = await documentTemplate(tx, tenantId, 'RESPONSIBILITY_TERM');
-      const vars = { taxa_diagnostico: o.diagnosisFeeCents ? formatBRL(o.diagnosisFeeCents) : 'sem taxa', link_consulta: `${this.env.APP_URL}/status` };
-      const text = `${renderPlaceholders(intake.content, vars)}\n\n${renderPlaceholders(resp.content, vars)}`;
+      const { text, intake, resp } = await intakeTermText(tx, tenantId, o.diagnosisFeeCents, this.env.APP_URL);
       const documentHash = sha256Hex(`OS ${o.number}\n${o.reportedIssue}\n${text}`);
-      const file = await this.signatures.store(tx, o, input.signaturePng);
+      // Três formas: celular do cliente (QR), desenhada na tela da loja, ou ficha impressa assinada.
+      let signerName = input.signerName;
+      let file: { id: string } | null = null;
+      let method: string;
+      if (input.signatureCaptureId) {
+        const cap = await this.signatures.consumeCapture(tx, o, input.signatureCaptureId, 'INTAKE');
+        file = await this.signatures.storeBuffer(tx, o, cap.buf);
+        signerName = cap.signerName;
+        method = 'assinatura_no_celular_do_cliente';
+      } else if (input.signaturePng) {
+        file = await this.signatures.store(tx, o, input.signaturePng);
+        method = 'assinatura_manuscrita_em_dispositivo';
+      } else {
+        method = 'assinatura_em_papel_na_ficha_impressa';
+      }
       const c = ctx();
       const term = await tx.serviceOrderTerm.create({
         data: {
@@ -478,11 +489,11 @@ export class ServiceOrdersService {
           termVersion: Math.max(intake.version, resp.version),
           documentHash,
           acceptedAt: new Date(),
-          signerName: input.signerName,
+          signerName,
           signerDocument: input.signerDocument,
-          signatureFileId: file.id,
+          signatureFileId: file?.id ?? null,
           evidenceJson: {
-            method: 'assinatura_manuscrita_em_dispositivo',
+            method,
             collectedBy: auth().userId,
             ipHash: this.crypto.ipHash(c.ip),
             userAgent: c.userAgent?.slice(0, 200) ?? null,
@@ -778,7 +789,14 @@ export class ServiceOrdersService {
         override = true;
       }
       await bumpVersion(tx, 'service_orders', id, input.version);
-      const file = input.signaturePng ? await this.signatures.store(tx, o, input.signaturePng) : null;
+      // Assinatura de retirada: celular do cliente (QR), tela da loja ou só conferência presencial.
+      const captured = input.signatureCaptureId ? await this.signatures.consumeCapture(tx, o, input.signatureCaptureId, 'PICKUP') : null;
+      const file = captured
+        ? await this.signatures.storeBuffer(tx, o, captured.buf)
+        : input.signaturePng
+          ? await this.signatures.store(tx, o, input.signaturePng)
+          : null;
+      const signatureMethod = captured ? 'assinatura_no_celular_do_cliente' : file ? 'assinatura_manuscrita_em_dispositivo' : 'conferencia_presencial';
       const now = new Date();
       const pickupText = (await documentTemplate(tx, o.tenantId, 'PICKUP_RECEIPT')).content;
       await tx.pickupReceipt.create({
@@ -806,7 +824,7 @@ export class ServiceOrdersService {
           signerName: input.receivedByName,
           signerDocument: input.receivedByDocument,
           signatureFileId: file?.id ?? null,
-          evidenceJson: { method: file ? 'assinatura_manuscrita_em_dispositivo' : 'conferencia_presencial', deliveredBy: a.userId },
+          evidenceJson: { method: signatureMethod, deliveredBy: a.userId, ...(captured ? { signerNameOnPhone: captured.signerName } : {}) },
           createdBy: a.userId,
         },
       });
