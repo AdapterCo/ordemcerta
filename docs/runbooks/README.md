@@ -7,12 +7,12 @@ Prefixo de comando em produção: `DC="docker compose -f docker-compose.yml -f d
 1. `./infra/backup/backup.sh` (confirme sucesso).
 2. `IMAGE_TAG=<nova> $DC build api worker web`
 3. `IMAGE_TAG=<nova> $DC run --rm oc-migrate` — migrações backward-compatible (expand → deploy → contract em versões seguintes).
-4. `IMAGE_TAG=<nova> $DC up -d api worker web`
+4. `IMAGE_TAG=<nova> $DC up -d oc-api oc-worker oc-web`
 5. Verificar `/health/ready`, logs (`$DC logs -f api worker`) e um fluxo manual (login, listar OS).
 
 ## Rollback
 
-- Aplicação: `IMAGE_TAG=<anterior> $DC up -d api worker web`.
+- Aplicação: `IMAGE_TAG=<anterior> $DC up -d oc-api oc-worker oc-web`.
 - Banco: migrações não são revertidas automaticamente. Só restaure backup (`restore.sh … --confirm`) com janela de manutenção e decisão explícita — há perda de dados posteriores ao backup.
 
 ## Backup e restauração
