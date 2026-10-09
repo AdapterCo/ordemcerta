@@ -3,37 +3,58 @@
 # Não interfere nas portas 80/443/3000 do EasyPanel.
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 # Antes: confirme rede/entrypoint/certresolver efetivos (ver infra/traefik/README.md).
+#
+# Limites de memória: a VPS é compartilhada com outros apps (sem swap), então cada
+# container tem teto para que o OrdemCerta nunca consuma a memória dos demais.
+# Total máximo ~1,3 GB; uso típico bem menor.
 services:
-  api:
+  oc-postgres:
+    mem_limit: 384m
+    command: ['postgres', '-c', 'shared_buffers=64MB', '-c', 'effective_cache_size=192MB', '-c', 'work_mem=4MB', '-c', 'maintenance_work_mem=32MB', '-c', 'max_connections=60']
+
+  oc-redis:
+    mem_limit: 128m
+
+  oc-migrate:
+    mem_limit: 384m
+
+  oc-api:
+    mem_limit: 448m
+    environment:
+      NODE_OPTIONS: --max-old-space-size=320
     networks: [internal, traefik]
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK}
-      - traefik.http.routers.oc-api.rule=Host(`${APP_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/health`))
-      - traefik.http.routers.oc-api.priority=100
-      - traefik.http.routers.oc-api.entrypoints=${TRAEFIK_ENTRYPOINT}
-      - traefik.http.routers.oc-api.tls=true
-      - traefik.http.routers.oc-api.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
-      - traefik.http.routers.oc-api.middlewares=oc-sec
-      - traefik.http.services.oc-api.loadbalancer.server.port=3001
-      - traefik.http.middlewares.oc-sec.headers.stsSeconds=31536000
-      - traefik.http.middlewares.oc-sec.headers.stsIncludeSubdomains=true
-      - traefik.http.middlewares.oc-sec.headers.contentTypeNosniff=true
-      - traefik.http.middlewares.oc-sec.headers.referrerPolicy=no-referrer
+      - traefik.http.routers.ordemcerta-api.rule=Host(`${APP_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/health`))
+      - traefik.http.routers.ordemcerta-api.priority=100
+      - traefik.http.routers.ordemcerta-api.entrypoints=${TRAEFIK_ENTRYPOINT}
+      - traefik.http.routers.ordemcerta-api.tls=true
+      - traefik.http.routers.ordemcerta-api.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
+      - traefik.http.routers.ordemcerta-api.middlewares=ordemcerta-sec
+      - traefik.http.services.ordemcerta-api.loadbalancer.server.port=3001
+      - traefik.http.middlewares.ordemcerta-sec.headers.stsSeconds=31536000
+      - traefik.http.middlewares.ordemcerta-sec.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.ordemcerta-sec.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.ordemcerta-sec.headers.referrerPolicy=no-referrer
 
-  web:
+  oc-web:
+    mem_limit: 64m
     networks: [traefik]
     labels:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK}
-      - traefik.http.routers.oc-web.rule=Host(`${APP_DOMAIN}`)
-      - traefik.http.routers.oc-web.priority=10
-      - traefik.http.routers.oc-web.entrypoints=${TRAEFIK_ENTRYPOINT}
-      - traefik.http.routers.oc-web.tls=true
-      - traefik.http.routers.oc-web.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
-      - traefik.http.services.oc-web.loadbalancer.server.port=80
+      - traefik.http.routers.ordemcerta-web.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.ordemcerta-web.priority=10
+      - traefik.http.routers.ordemcerta-web.entrypoints=${TRAEFIK_ENTRYPOINT}
+      - traefik.http.routers.ordemcerta-web.tls=true
+      - traefik.http.routers.ordemcerta-web.tls.certresolver=${TRAEFIK_CERT_RESOLVER}
+      - traefik.http.services.ordemcerta-web.loadbalancer.server.port=80
 
-  worker:
+  oc-worker:
+    mem_limit: 320m
+    environment:
+      NODE_OPTIONS: --max-old-space-size=224
     deploy:
       replicas: 1
 

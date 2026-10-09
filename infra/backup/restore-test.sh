@@ -7,11 +7,11 @@ LATEST="$(ls -1 "$BACKUP_DIR/db/" 2>/dev/null | grep -E '\.dump\.gpg$' | sort | 
 [[ -n "$LATEST" ]] || { echo "nenhum backup encontrado"; exit 1; }
 TMP_DB="ordemcerta_restore_test"
 "$(dirname "$0")/restore.sh" "$LATEST" "$TMP_DB" --confirm
-docker compose exec -T postgres psql -U postgres -d "$TMP_DB" -v ON_ERROR_STOP=1 <<'EOSQL'
+docker compose exec -T oc-postgres psql -U postgres -d "$TMP_DB" -v ON_ERROR_STOP=1 <<'EOSQL'
 SELECT count(*) AS migrations FROM _prisma_migrations WHERE finished_at IS NOT NULL;
 SELECT count(*) AS tenants FROM tenants;
 SELECT count(*) AS orders FROM service_orders;
 SELECT count(*) AS plans FROM plans;
 EOSQL
-docker compose exec -T postgres dropdb -U postgres "$TMP_DB"
+docker compose exec -T oc-postgres dropdb -U postgres "$TMP_DB"
 echo "[restore-test] OK: $LATEST"

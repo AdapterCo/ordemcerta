@@ -16,7 +16,7 @@ mkdir -p "$BACKUP_DIR/db"
 chmod 700 "$BACKUP_DIR"
 
 echo "[backup] pg_dump (formato custom)"
-docker compose exec -T postgres pg_dump -U postgres -d ordemcerta -Fc --no-owner > "$FILE"
+docker compose exec -T oc-postgres pg_dump -U postgres -d ordemcerta -Fc --no-owner > "$FILE"
 
 echo "[backup] criptografando (AES256)"
 gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" --symmetric --cipher-algo AES256 -o "$FILE.gpg" "$FILE"

@@ -16,9 +16,9 @@ cp "$BACKUP_DIR/db/$NAME.sha256" "$WORK/b.sha256"
 [[ "$(sha256sum "$WORK/b.gpg" | awk '{print $1}')" == "$(cat "$WORK/b.sha256")" ]] || { echo "checksum inválido"; exit 2; }
 gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" -o "$WORK/b.dump" -d "$WORK/b.gpg"
 
-docker compose exec -T postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$TARGET_DB' AND pid <> pg_backend_pid();" >/dev/null
-docker compose exec -T postgres dropdb -U postgres --if-exists "$TARGET_DB"
-docker compose exec -T postgres createdb -U postgres -O ordemcerta_owner "$TARGET_DB"
-docker compose exec -T postgres pg_restore -U postgres -d "$TARGET_DB" --no-owner --role=ordemcerta_owner < "$WORK/b.dump"
+docker compose exec -T oc-postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$TARGET_DB' AND pid <> pg_backend_pid();" >/dev/null
+docker compose exec -T oc-postgres dropdb -U postgres --if-exists "$TARGET_DB"
+docker compose exec -T oc-postgres createdb -U postgres -O ordemcerta_owner "$TARGET_DB"
+docker compose exec -T oc-postgres pg_restore -U postgres -d "$TARGET_DB" --no-owner --role=ordemcerta_owner < "$WORK/b.dump"
 echo "[restore] concluído em $TARGET_DB. Reaplique grants: SELECT oc_apply_grants();"
-docker compose exec -T postgres psql -U postgres -d "$TARGET_DB" -c "SELECT oc_apply_grants();" >/dev/null
+docker compose exec -T oc-postgres psql -U postgres -d "$TARGET_DB" -c "SELECT oc_apply_grants();" >/dev/null

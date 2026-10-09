@@ -19,8 +19,8 @@ Roteamento (`docker-compose.prod.yml`):
 
 | Router | Regra | Serviço | Prioridade |
 |---|---|---|---|
-| `oc-api` | `Host(APP_DOMAIN) && (PathPrefix(/api) \|\| PathPrefix(/health))` | api:3001 (inclui WebSocket `/api/v1/realtime`) | 100 |
-| `oc-web` | `Host(APP_DOMAIN)` | web:80 | 10 |
+| `ordemcerta-api` | `Host(APP_DOMAIN) && (PathPrefix(/api) \|\| PathPrefix(/health))` | oc-api:3001 (inclui WebSocket `/api/v1/realtime`) | 100 |
+| `ordemcerta-web` | `Host(APP_DOMAIN)` | oc-web:80 | 10 |
 
 Webhooks públicos: `POST /api/v1/webhooks/mercadopago` e `GET/POST /api/v1/webhooks/whatsapp` (assinatura validada na aplicação).
 

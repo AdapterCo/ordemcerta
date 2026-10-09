@@ -43,7 +43,7 @@ Copie `.env.example` para `.env` e preencha. Pontos críticos:
 ```bash
 cp .env.example .env            # ajuste NODE_ENV=development, MAIL_TRANSPORT=console, COOKIE_SECURE=false, APP_URL=http://localhost:5173
 pnpm install --frozen-lockfile
-docker compose up -d postgres redis
+docker compose up -d oc-postgres oc-redis
 pnpm db:generate
 DATABASE_MIGRATION_URL=... pnpm db:migrate:deploy
 SEED_DEMO=true pnpm db:seed     # planos + empresa fictícia (demo.dono@ordemcerta.test / DemoOrdemCerta2026)
@@ -69,9 +69,9 @@ O CI (`.github/workflows/ci.yml`) cria os papéis, aplica as migrations do zero,
 3. Primeira instalação:
    ```bash
    docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm migrate
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api worker web
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d oc-postgres oc-redis
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm oc-migrate
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d oc-api oc-worker oc-web
    ```
 4. Verifique `https://ordemcerta.adapterco.com.br/health/ready` e os logs.
 
@@ -80,7 +80,7 @@ PostgreSQL e Redis **não** são publicados no host; o compose não usa as porta
 ### Atualização e rollback
 
 - Imagens versionadas com `IMAGE_TAG`. Migrações são backward-compatible e rodam **antes** da troca de imagens, por job dedicado (`migrate`). Nunca `prisma db push` em produção.
-- Rollback: `IMAGE_TAG=<anterior> docker compose ... up -d api worker web`. Detalhes em [`docs/runbooks`](docs/runbooks/README.md).
+- Rollback: `IMAGE_TAG=<anterior> docker compose ... up -d oc-api oc-worker oc-web`. Detalhes em [`docs/runbooks`](docs/runbooks/README.md).
 - Nunca execute migração destrutiva sem backup recente e confirmação.
 
 ## Backup
