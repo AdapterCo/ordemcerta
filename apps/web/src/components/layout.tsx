@@ -140,17 +140,22 @@ export function AppLayout() {
 
   const sidebar = (
     <nav className="blueprint flex h-full flex-col overflow-y-auto bg-ink-900 text-white/80" aria-label="Navegação principal">
-      <Link to="/app/dashboard" className="flex items-center gap-2.5 px-5 pb-5 pt-6" onClick={() => setOpen(false)}>
-        <BrandMark className="h-8 w-8" />
-        <span className="font-display text-[19px] font-bold tracking-tight text-white">OrdemCerta</span>
+      <Link to="/app/dashboard" className="flex items-center gap-2.5 px-5 pb-5 pt-6 md:max-lg:justify-center md:max-lg:px-0" onClick={() => setOpen(false)} title="OrdemCerta">
+        <BrandMark className="h-8 w-8 shrink-0" />
+        <span className="font-display text-[19px] font-bold tracking-tight text-white md:max-lg:sr-only">OrdemCerta</span>
       </Link>
-      <div className="flex-1 space-y-6 px-3 pb-6">
+      <div className="flex-1 space-y-6 px-3 pb-6 md:max-lg:space-y-3 md:max-lg:px-2">
         {NAV.map((g, i) => {
           const items = g.items.filter(visible);
           if (!items.length) return null;
           return (
             <div key={i}>
-              {g.group && <p className="mb-1.5 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">{g.group}</p>}
+              {g.group && (
+                <>
+                  <p className="mb-1.5 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35 md:max-lg:hidden">{g.group}</p>
+                  <hr aria-hidden className="mx-2 mb-3 hidden border-white/10 md:max-lg:block" />
+                </>
+              )}
               <ul className="space-y-0.5">
                 {items.map((it) => (
                   <li key={it.to}>
@@ -158,18 +163,19 @@ export function AppLayout() {
                       to={it.to}
                       end={it.to === '/app/service-orders' || it.to === '/app/sales' || it.to === '/app/stock'}
                       onClick={() => setOpen(false)}
+                      title={it.label}
                       className={({ isActive }) =>
                         cn(
-                          'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors',
+                          'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-colors pointer-coarse:py-2.5 md:max-lg:justify-center md:max-lg:px-0 md:max-lg:py-2.5',
                           isActive ? 'bg-white/[0.09] text-white' : 'text-white/65 hover:bg-white/[0.05] hover:text-white',
                         )
                       }
                     >
                       {({ isActive }) => (
                         <>
-                          {isActive && <span aria-hidden className="absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full bg-brand-400 shadow-[0_0_12px_var(--color-teal-400)]" />}
-                          <span className={cn('transition-colors', isActive ? 'text-brand-300' : 'text-white/45 group-hover:text-white/80')}>{it.icon}</span>
-                          {it.label}
+                          {isActive && <span aria-hidden className="absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full bg-brand-400 shadow-[0_0_12px_var(--color-teal-400)] md:max-lg:-left-2" />}
+                          <span className={cn('transition-colors md:max-lg:[&>svg]:h-5 md:max-lg:[&>svg]:w-5', isActive ? 'text-brand-300' : 'text-white/45 group-hover:text-white/80')}>{it.icon}</span>
+                          <span className="md:max-lg:sr-only">{it.label}</span>
                         </>
                       )}
                     </NavLink>
@@ -180,10 +186,10 @@ export function AppLayout() {
           );
         })}
       </div>
-      <div className="border-t border-white/[0.08] px-4 py-4">
-        <div className="flex items-center gap-3">
+      <div className="safe-bottom border-t border-white/[0.08] px-4 py-4 md:max-lg:px-2">
+        <div className="flex items-center gap-3 md:max-lg:flex-col md:max-lg:gap-2">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500/20 font-mono text-xs font-semibold text-brand-200">{initials}</span>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 md:max-lg:sr-only">
             <p className="truncate text-sm font-semibold text-white">{me!.user.name}</p>
             <p className="truncate text-xs text-white/45">{current.tenant.name}</p>
           </div>
@@ -197,16 +203,16 @@ export function AppLayout() {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="no-print sticky top-0 hidden h-screen w-64 shrink-0 lg:block">{sidebar}</aside>
+      <aside className="no-print sticky top-0 hidden h-screen w-[76px] shrink-0 md:block lg:w-64">{sidebar}</aside>
       {open && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 animate-fade bg-ink-950/50 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
           <aside className="absolute inset-y-0 left-0 w-72 animate-enter shadow-2xl">{sidebar}</aside>
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="no-print sticky top-0 z-30 flex flex-wrap items-center gap-2 border-b border-line/80 bg-paper/80 px-4 py-2.5 backdrop-blur-md">
-          <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setOpen(true)} aria-label="Abrir menu">
+          <Button variant="ghost" size="sm" className="md:hidden" onClick={() => setOpen(true)} aria-label="Abrir menu">
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
           {me!.tenants.length > 1 ? (
@@ -232,7 +238,7 @@ export function AppLayout() {
           {can('os:view') && (
             <form
               role="search"
-              className="relative min-w-40 flex-1 sm:max-w-md"
+              className="relative order-last w-full sm:order-none sm:w-auto sm:min-w-40 sm:flex-1 sm:max-w-md"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (q.trim()) navigate(`/app/service-orders?q=${encodeURIComponent(q.trim())}`);
@@ -252,9 +258,9 @@ export function AppLayout() {
             {can('messaging:view') && <WhatsAppBadge />}
             {current.supportAccess && <Badge tone="purple">Acesso de suporte (somente leitura)</Badge>}
             {can('os:create') && (
-              <Link to="/app/service-orders/new" className="hidden sm:block">
-                <Button size="sm">
-                  <Plus className="h-4 w-4" /> Nova OS
+              <Link to="/app/service-orders/new" aria-label="Nova OS">
+                <Button size="sm" tabIndex={-1}>
+                  <Plus className="h-4 w-4" /> <span className="hidden sm:inline">Nova OS</span>
                 </Button>
               </Link>
             )}

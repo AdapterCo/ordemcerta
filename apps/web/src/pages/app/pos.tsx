@@ -91,6 +91,10 @@ export function PosPage() {
     totalsError = (e as Error).message;
   }
   const paid = parts.reduce((s, p) => s + p.amountCents, 0);
+  const openCheckout = () => {
+    setParts([{ method: 'CASH', amountCents: totals.totalCents, tenderedCents: totals.totalCents }]);
+    setCheckout(true);
+  };
 
   const finish = async () => {
     setBusy(true);
@@ -130,9 +134,10 @@ export function PosPage() {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="lg:col-span-2">
-        <PageHeader title="PDV" description={`${mySession?.register.name ?? ''} · F2 buscar · F9 finalizar`} />
+    <div className="grid grid-cols-1 gap-4 max-lg:pb-28 lg:grid-cols-3">
+      <div className="min-w-0 lg:col-span-2">
+        <PageHeader title="PDV" description={mySession?.register.name ?? ''} />
+        <p className="-mt-4 mb-4 hidden text-xs text-ink-600/60 pointer-fine:block">Atalhos: F2 busca o produto, F9 finaliza a venda.</p>
         {orderId && (
           <div className="mb-3">
             <Alert tone="blue" title="Venda vinculada a uma ordem de serviço">
@@ -149,14 +154,16 @@ export function PosPage() {
             void scan();
           }}
         >
-          <Input ref={search} autoFocus aria-label="Código de barras ou busca" placeholder="Leia o código de barras ou digite o nome/SKU" value={term} onChange={(e) => setTerm(e.target.value)} />
+          <Input ref={search} autoFocus aria-label="Código de barras ou busca" placeholder="Código de barras ou nome do produto" value={term} onChange={(e) => setTerm(e.target.value)} />
         </form>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           {results.data?.items.map((p) => (
-            <button key={p.id} type="button" className="rounded border border-slate-200 bg-white p-2 text-left text-sm hover:bg-slate-50" onClick={() => add(p)}>
-              <span className="font-medium">{p.name}</span>
-              <span className="float-right tabular-nums">{formatBRL(p.promoPriceCents ?? p.priceCents)}</span>
-              <span className="block text-xs text-slate-500">{p.sku}</span>
+            <button key={p.id} type="button" className="flex items-center justify-between gap-3 rounded-xl border border-line bg-white px-3 py-2.5 text-left text-sm shadow-card transition-colors hover:border-brand-300 hover:bg-brand-50/40" onClick={() => add(p)}>
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-ink-900">{p.name}</span>
+                <span className="num block text-xs text-ink-600/60">{p.sku}</span>
+              </span>
+              <span className="num shrink-0 font-semibold text-ink-900">{formatBRL(p.promoPriceCents ?? p.priceCents)}</span>
             </button>
           ))}
         </div>
@@ -176,7 +183,7 @@ export function PosPage() {
               <tr>
                 <Td colSpan={6} className="py-14 text-center">
                   <p className="font-display text-base font-semibold text-ink-900">Carrinho vazio</p>
-                  <p className="mt-1 text-sm text-ink-600/70">Leia o código de barras ou digite o nome do produto acima (atalho F2).</p>
+                  <p className="mt-1 text-sm text-ink-600/70">Leia o código de barras ou digite o nome do produto acima.</p>
                 </Td>
               </tr>
             )}
@@ -227,19 +234,22 @@ export function PosPage() {
           </Field>
         )}
         {totalsError && <p className="mt-2 text-sm text-red-600">{totalsError}</p>}
-        <Button
-          size="lg"
-          className="mt-4 w-full"
-          disabled={!cart.length || Boolean(totalsError)}
-          onClick={() => {
-            setParts([{ method: 'CASH', amountCents: totals.totalCents, tenderedCents: totals.totalCents }]);
-            setCheckout(true);
-          }}
-        >
-          Finalizar (F9)
+        <Button size="lg" className="mt-4 w-full max-lg:hidden" disabled={!cart.length || Boolean(totalsError)} onClick={openCheckout}>
+          Finalizar <span className="pointer-coarse:hidden">(F9)</span>
         </Button>
-        <p className="mt-2 text-center text-xs text-slate-500">Comprovante NÃO FISCAL</p>
+        <p className="mt-2 text-center text-xs text-ink-600/60">Comprovante não fiscal</p>
       </Card>
+
+      {/* celular/tablet: total e finalizar sempre à mão no rodapé */}
+      <div className="safe-bottom fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-line bg-white/95 px-4 pt-3 shadow-[0_-8px_24px_-12px_rgb(16_48_47/0.25)] backdrop-blur lg:hidden">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-ink-600/70">{cart.length ? `${cart.reduce((n, c) => n + c.qty, 0)} item(ns)` : 'Carrinho vazio'}</p>
+          <p className="num text-xl font-semibold text-ink-950">{formatBRL(totals.totalCents)}</p>
+        </div>
+        <Button size="lg" disabled={!cart.length || Boolean(totalsError)} onClick={openCheckout}>
+          Finalizar
+        </Button>
+      </div>
 
       <Dialog
         open={checkout}

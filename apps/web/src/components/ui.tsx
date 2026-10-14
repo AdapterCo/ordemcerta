@@ -1,7 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
-import { forwardRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { forwardRef, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ Button */
@@ -27,7 +27,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({ className, v
     aria-busy={loading || undefined}
     className={cn(
       'inline-flex select-none items-center justify-center gap-2 rounded-lg font-semibold transition-all duration-150 disabled:cursor-not-allowed',
-      size === 'sm' ? 'h-8 px-3 text-[13px]' : size === 'lg' ? 'h-12 px-6 text-[15px]' : 'h-10 px-4 text-sm',
+      // em telas de toque, botões pequenos ganham altura de toque confortável
+      size === 'sm' ? 'h-8 px-3 text-[13px] pointer-coarse:h-10' : size === 'lg' ? 'h-12 px-6 text-[15px]' : 'h-10 px-4 text-sm pointer-coarse:h-11',
       variants[variant],
       className,
     )}
@@ -41,8 +42,9 @@ Button.displayName = 'Button';
 
 /* ------------------------------------------------------------------ Inputs */
 
+// 16px no celular: abaixo disso o iPhone dá zoom ao tocar no campo
 const fieldBase =
-  'w-full rounded-lg border border-line bg-white px-3 text-sm text-ink-900 shadow-[inset_0_1px_1px_rgb(16_48_47/0.04)] transition-colors placeholder:text-ink-600/45 hover:border-ink-600/30 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-500/15 disabled:bg-paper-2 disabled:text-ink-600/60 aria-[invalid=true]:border-red-500';
+  'w-full rounded-lg border border-line bg-white px-3 text-base sm:text-sm text-ink-900 shadow-[inset_0_1px_1px_rgb(16_48_47/0.04)] transition-colors placeholder:text-ink-600/45 hover:border-ink-600/30 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-500/15 disabled:bg-paper-2 disabled:text-ink-600/60 aria-[invalid=true]:border-red-500';
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => (
   <input ref={ref} className={cn(fieldBase, 'h-10', className)} {...p} />
@@ -207,10 +209,41 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
 
 /* ------------------------------------------------------------------ Table */
 
-export function Table({ children, className }: { children: ReactNode; className?: string }) {
+/**
+ * Tabela. No celular (stack, padrão) cada linha vira um cartão "rótulo: valor":
+ * os rótulos saem dos cabeçalhos e são reaplicados quando as linhas mudam.
+ * stack={false} mantém a tabela com rolagem lateral (ex.: grades de edição).
+ */
+export function Table({ children, className, stack = true }: { children: ReactNode; className?: string; stack?: boolean }) {
+  const ref = useRef<HTMLTableElement>(null);
+  useLayoutEffect(() => {
+    const t = ref.current;
+    if (!t || !stack) return;
+    const apply = () => {
+      const heads = [...t.querySelectorAll('thead th')].map((th) => th.textContent?.trim() ?? '');
+      t.querySelectorAll('tbody tr').forEach((tr) => {
+        let col = 0;
+        for (const cell of Array.from(tr.children) as HTMLTableCellElement[]) {
+          const span = cell.colSpan || 1;
+          if (span === 1 && heads[col]) cell.setAttribute('data-label', heads[col]!);
+          else cell.removeAttribute('data-label');
+          // célula sem conteúdo ("—" ou vazia, sem botão/link) some no cartão do celular
+          const text = cell.textContent?.trim() ?? '';
+          const empty = (text === '' || text === '—') && !cell.querySelector('button, a, input, select, textarea, img, svg');
+          if (empty) cell.setAttribute('data-empty', '');
+          else cell.removeAttribute('data-empty');
+          col += span;
+        }
+      });
+    };
+    apply();
+    const mo = new MutationObserver(apply);
+    mo.observe(t, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [stack]);
   return (
-    <div className="overflow-x-auto rounded-xl border border-line bg-white">
-      <table className={cn('w-full text-left text-sm [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-brand-50/40', className)}>
+    <div className={cn('overflow-x-auto rounded-xl border border-line bg-white', stack && 'max-sm:overflow-visible')}>
+      <table ref={ref} className={cn('w-full text-left text-sm [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-brand-50/40', stack && 'table-stack', className)}>
         {children}
       </table>
     </div>
@@ -244,10 +277,13 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-ink-950/45 backdrop-blur-[2px] data-[state=open]:animate-fade" />
         <DialogPrimitive.Content
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line bg-white shadow-[0_30px_80px_-20px_rgb(6_26_25/0.45)] data-[state=open]:animate-pop',
-            wide ? 'max-w-3xl' : 'max-w-lg',
+            // celular: folha que sobe da base, largura total; tablet/PC: janela centralizada
+            'fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-line bg-white shadow-[0_30px_80px_-20px_rgb(6_26_25/0.45)] data-[state=open]:animate-sheet',
+            'sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-h-[90vh] sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:data-[state=open]:animate-pop',
+            wide ? 'sm:max-w-3xl' : 'sm:max-w-lg',
           )}
         >
+          <div aria-hidden className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-ink-900/15 sm:hidden" />
           <div className="flex items-start justify-between gap-4 border-b border-line/70 px-6 py-4">
             <div>
               <DialogPrimitive.Title className="font-display text-lg font-bold text-ink-950">{title}</DialogPrimitive.Title>
@@ -262,7 +298,9 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
             </DialogPrimitive.Close>
           </div>
           <div className="px-6 py-5">{children}</div>
-          {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line/70 bg-paper/60 px-6 py-3.5">{footer}</div>}
+          {footer && (
+            <div className="safe-bottom sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-line/70 bg-paper/95 px-6 py-3.5 backdrop-blur max-sm:[&>*]:flex-1">{footer}</div>
+          )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

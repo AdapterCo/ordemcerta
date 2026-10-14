@@ -50,6 +50,7 @@
   --animate-enter: enter 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-pop: pop 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-fade: fade 0.2s ease-out both;
+  --animate-sheet: sheet 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
   @keyframes enter {
     from {
@@ -61,14 +62,24 @@
       transform: none;
     }
   }
+  /* só escala: a centralização usa a propriedade `translate` (Tailwind 4) e não pode ser somada aqui */
   @keyframes pop {
     from {
       opacity: 0;
-      transform: translate(-50%, -48%) scale(0.97);
+      transform: scale(0.97);
     }
     to {
       opacity: 1;
-      transform: translate(-50%, -50%) scale(1);
+      transform: none;
+    }
+  }
+  /* folha que sobe da base da tela (janelas no celular) */
+  @keyframes sheet {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
     }
   }
   @keyframes fade {
@@ -132,6 +143,79 @@
       linear-gradient(90deg, rgb(255 255 255 / 0.045) 1px, transparent 1px);
     background-size: 28px 28px;
   }
+}
+
+/*
+ * Tabelas no celular: cada linha vira um cartão "rótulo: valor".
+ * Os rótulos vêm dos cabeçalhos (data-label preenchido pelo componente Table).
+ */
+@media (max-width: 639px) {
+  .table-stack thead {
+    display: none;
+  }
+  .table-stack,
+  .table-stack tbody,
+  .table-stack tr {
+    display: block;
+    width: 100%;
+  }
+  .table-stack tbody tr {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .table-stack tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .table-stack td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 1.75rem;
+    padding: 0.2rem 0 !important;
+    border: 0 !important;
+    text-align: right;
+  }
+  .table-stack td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    max-width: 45%;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: color-mix(in oklab, var(--color-ink-600) 75%, transparent);
+  }
+  .table-stack td:not([data-label])::before,
+  .table-stack td[data-label='']::before {
+    content: none;
+  }
+  .table-stack td:not([data-label]),
+  .table-stack td[data-label=''] {
+    justify-content: flex-end;
+  }
+  /* primeira coluna (nº, nome) como título do cartão */
+  .table-stack td:first-child {
+    justify-content: flex-start;
+    font-weight: 600;
+    text-align: left;
+  }
+  .table-stack td:first-child::before {
+    content: none;
+  }
+  /* linha de "vazio"/mensagem ocupando a largura toda */
+  .table-stack td[colspan] {
+    display: block;
+    text-align: center;
+  }
+  /* campos sem valor não ocupam linha no cartão */
+  .table-stack td[data-empty] {
+    display: none;
+  }
+}
+
+/* barra de ações fixa no rodapé do celular respeita a área segura (iPhone) */
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
 @media (prefers-reduced-motion: reduce) {
