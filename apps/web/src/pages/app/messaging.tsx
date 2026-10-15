@@ -121,7 +121,7 @@ function ChannelCard({ channel }: { channel: any }) {
         )}
       </dl>
       {channel.lastError && <p className="mt-2 text-sm text-red-600">{channel.lastError}</p>}
-      {unofficial && status.data.status === 'ONBOARDING' && (
+      {unofficial && status.data?.status === 'ONBOARDING' && (
         <Button size="sm" className="mt-2" onClick={() => setQrOpen(true)}>
           Abrir QR de conexão
         </Button>
