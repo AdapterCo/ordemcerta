@@ -5,6 +5,7 @@ export * from './logger';
 export * from './storage';
 export * from './mercadopago';
 export * from './whatsapp';
+export * from './baileys';
 export * from './mailer';
 export * from './queues';
 export * from './templates';

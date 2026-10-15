@@ -1,5 +1,5 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { MessagingError, templateBodyParams, type ChannelCredentials } from '@ordemcerta/server';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { MessagingError, renderPlaceholders, templateBodyParams, type ChannelCredentials } from '@ordemcerta/server';
 import { UnrecoverableError, type Job } from 'bullmq';
 import { Deps, isLastAttempt } from '../deps';
 import { messageVariables } from '../messaging-render';
@@ -9,41 +9,70 @@ interface SendJob {
   tenantId: string;
   test?: boolean;
 }
+interface SessionJob {
+  channelId: string;
+  tenantId?: string;
+}
+type MessagingJobData = SendJob | SessionJob;
 
-/** Envio real via WhatsApp Cloud API oficial (BYOK). Só canal ACTIVE envia. */
+/**
+ * Envia notificações: canal WHATSAPP_CLOUD via Cloud API oficial (BYOK) e
+ * canal WHATSAPP_UNOFFICIAL_QR via Baileys (sessão no worker). Também roteia
+ * jobs de controle de sessão (session-start / session-stop). Só canal ACTIVE envia.
+ */
 @Injectable()
 export class MessagingProcessor implements OnModuleInit {
   constructor(private readonly deps: Deps) {}
 
   onModuleInit() {
-    this.deps.startWorker<SendJob>('messaging', (job) => this.send(job), { concurrency: 10, limiter: { max: 40, duration: 1_000 } });
+    void this.deps.sessions.init();
+    this.deps.startWorker<MessagingJobData>('messaging', (job) => this.route(job), { concurrency: 10, limiter: { max: 40, duration: 1_000 } });
+  }
+
+  private async route(job: Job<MessagingJobData>) {
+    if (job.name === 'session-start') {
+      await this.deps.sessions.startSession((job.data as SessionJob).channelId);
+      return;
+    }
+    if (job.name === 'session-stop') {
+      const d = job.data as SessionJob;
+      await this.deps.sessions.stopSession(d.channelId, (job.data as { logout?: boolean }).logout === true);
+      return;
+    }
+    await this.send(job as unknown as Job<SendJob>);
+  }
+
+  private async blockDelivery(id: string, lastError: string) {
+    await this.deps.db.messageDelivery.update({ where: { id }, data: { status: 'BLOCKED', lastError } });
+  }
+
+  private async skipDelivery(id: string, lastError: string) {
+    await this.deps.db.messageDelivery.update({ where: { id }, data: { status: 'SKIPPED', lastError } });
   }
 
   async send(job: Job<SendJob>) {
-    const { db, crypto, whatsapp, env } = this.deps;
+    const { db, crypto, env } = this.deps;
     const d = await db.messageDelivery.findFirst({ where: { id: job.data.deliveryId, tenantId: job.data.tenantId } });
     if (!d || !['QUEUED', 'FAILED'].includes(d.status)) return;
     const channel = d.channelId ? await db.messagingChannel.findFirst({ where: { id: d.channelId, tenantId: d.tenantId } }) : null;
     if (!channel || channel.status !== 'ACTIVE' || !channel.encryptedCredentialsRef) {
-      await db.messageDelivery.update({ where: { id: d.id }, data: { status: 'BLOCKED', lastError: 'Canal não ativo no momento do envio' } });
+      await this.blockDelivery(d.id, 'Canal não ativo no momento do envio');
       return;
     }
-    if (channel.provider !== 'WHATSAPP_CLOUD') {
-      await db.messageDelivery.update({ where: { id: d.id }, data: { status: 'FAILED', lastError: 'Adaptador não oficial não habilitado' } });
-      return;
-    }
+    const official = channel.provider === 'WHATSAPP_CLOUD';
     const consent = await db.customerConsent.findFirst({
       where: { tenantId: d.tenantId, customerId: d.customerId, channel: 'WHATSAPP', purpose: 'SERVICE_NOTIFICATIONS', revokedAt: null },
     });
     if (!consent) {
-      await db.messageDelivery.update({ where: { id: d.id }, data: { status: 'SKIPPED', lastError: 'Opt-out/sem consentimento no momento do envio' } });
+      await this.skipDelivery(d.id, 'Opt-out/sem consentimento no momento do envio');
       return;
     }
     const template = d.templateId ? await db.messageTemplate.findFirst({ where: { id: d.templateId, tenantId: d.tenantId } }) : null;
     const customer = await db.customer.findFirstOrThrow({ where: { id: d.customerId, tenantId: d.tenantId } });
     const to = customer.whatsappE164 ?? customer.phoneE164;
-    if (!template || template.approvalStatus !== 'APPROVED' || !template.enabled || !to) {
-      await db.messageDelivery.update({ where: { id: d.id }, data: { status: 'SKIPPED', lastError: 'Template indisponível ou cliente sem telefone' } });
+    // API oficial exige template aprovado na Meta; canal QR usa o texto local renderizado.
+    if (!template || !template.enabled || !template.body || !to || (official && template.approvalStatus !== 'APPROVED')) {
+      await this.skipDelivery(d.id, 'Template indisponível ou cliente sem telefone');
       return;
     }
 
@@ -75,11 +104,19 @@ export class MessagingProcessor implements OnModuleInit {
       estimatedDeliveryAt: order?.estimatedDeliveryAt,
       timezone: order?.branch.timezone ?? tenant.timezone,
     });
-    const params = templateBodyParams((template.variablesJson as string[]) ?? [], vars);
-    const creds = JSON.parse(crypto.decrypt(channel.encryptedCredentialsRef)) as ChannelCredentials;
 
     try {
-      const { providerMessageId } = await whatsapp.sendTemplate(creds, { to, templateName: template.name, language: template.language, bodyParams: params });
+      let providerMessageId: string;
+      if (official) {
+        const params = templateBodyParams((template.variablesJson as string[]) ?? [], vars);
+        const creds = JSON.parse(crypto.decrypt(channel.encryptedCredentialsRef)) as ChannelCredentials;
+        providerMessageId = (await this.deps.whatsapp.sendTemplate(creds, { to, templateName: template.name, language: template.language, bodyParams: params })).providerMessageId;
+      } else {
+        // QR/Baileys: sessão tem de estar online; reconecta com credenciais salvas se necessário
+        await this.deps.sessions.ensureForSend(channel.id, channel.encryptedCredentialsRef);
+        const text = renderPlaceholders(template.body, vars);
+        providerMessageId = (await this.deps.sessions.sendText(channel.id, to, text)).providerMessageId;
+      }
       await db.messageDelivery.update({
         where: { id: d.id },
         data: { status: 'SENT', providerMessageId, sentAt: new Date(), attempts: { increment: 1 }, lastError: null },

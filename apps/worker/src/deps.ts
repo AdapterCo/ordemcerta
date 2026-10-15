@@ -15,6 +15,8 @@ import {
 } from '@ordemcerta/server';
 import type { PrismaClient } from '@prisma/client';
 import { Queue, Worker, type Job, type Processor, type WorkerOptions } from 'bullmq';
+import { Redis } from 'ioredis';
+import { SessionService } from './session.service';
 
 /**
  * Dependências do worker. Usa o papel de SISTEMA (BYPASSRLS) com escopo de
@@ -34,6 +36,8 @@ export class Deps implements OnModuleDestroy {
     error: (o: unknown, m?: string) => this.log.error(o as object, m),
   } as unknown as Console);
   readonly whatsapp = new WhatsAppCloudProvider(this.env.META_GRAPH_VERSION, this.env.META_APP_ID, this.env.META_APP_SECRET);
+  readonly redis = new Redis(this.env.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false });
+  readonly sessions = new SessionService(this);
   readonly connection = redisConnection(this.env.REDIS_URL);
 
   private readonly queues = new Map<QueueName, Queue>();
@@ -62,6 +66,8 @@ export class Deps implements OnModuleDestroy {
   async onModuleDestroy() {
     await Promise.all(this.workers.map((w) => w.close().catch(() => undefined)));
     await Promise.all([...this.queues.values()].map((q) => q.close().catch(() => undefined)));
+    await this.redis.quit().catch(() => undefined);
+    await this.sessions.destroy().catch(() => undefined);
     await this.db.$disconnect();
   }
 }

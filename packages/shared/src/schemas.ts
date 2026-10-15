@@ -568,7 +568,8 @@ export const closeCashSchema = z.object({
 
 export const createChannelSchema = z.object({
   branchId: uuid.optional().nullable(),
-  provider: z.enum(['WHATSAPP_CLOUD', 'WHATSAPP_UNOFFICIAL_QR']).default('WHATSAPP_CLOUD'),
+  // Padrão: canal não oficial (QR/Baileys). Oficial (Meta Cloud API) é opt-in por tenant.
+  provider: z.enum(['WHATSAPP_CLOUD', 'WHATSAPP_UNOFFICIAL_QR']).default('WHATSAPP_UNOFFICIAL_QR'),
   name: trimmed(80),
 });
 export const completeOnboardingSchema = z.object({

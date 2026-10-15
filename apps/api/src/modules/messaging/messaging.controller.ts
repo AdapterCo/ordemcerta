@@ -69,6 +69,13 @@ export class MessagingController {
     return this.messaging.connect(id);
   }
 
+  @Get('messaging/channels/:id/qr')
+  @Perm('messaging:view')
+  @Doc('QR de conexão do canal não oficial (data URL, caducando ~60s)')
+  qr(@Param('id', ParseUUIDPipe) id: string) {
+    return this.messaging.qr(id);
+  }
+
   @Post('messaging/channels/:id/disconnect')
   @Perm('messaging:manage')
   @HttpCode(200)

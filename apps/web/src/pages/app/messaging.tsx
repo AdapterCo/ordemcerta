@@ -1,5 +1,7 @@
 import { MESSAGE_TEMPLATE_VARIABLES, MESSAGING_EVENT_TYPES } from '@ordemcerta/shared';
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Pagination, QueryState, useAction, useApi } from '@/components/data';
 import { Alert, Badge, Button, Card, Checkbox, Dialog, Field, Input, PageHeader, Select, Table, Td, Textarea, Th } from '@/components/ui';
 import { api, type Paginated } from '@/lib/api';
@@ -8,15 +10,75 @@ import { formatDateTimeBR, MESSAGING_EVENT_LABELS, MESSAGING_STATUS_LABELS } fro
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+function QrDialog({ channel, open, onClose }: { channel: any; open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [qr, setQr] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await api<{ qr: string | null; status: string }>(`/messaging/channels/${channel.id}/qr`);
+        if (!alive) return;
+        setQr(r.qr);
+        setStatus(r.status);
+        if (r.status === 'ACTIVE') {
+          void qc.invalidateQueries({ queryKey: ['messaging-channels'] });
+          void qc.invalidateQueries({ queryKey: ['channel-status', channel.id] });
+          toast.success('WhatsApp conectado');
+          onClose();
+        }
+      } catch {
+        /* nova tentativa no próximo tick */
+      }
+    };
+    void tick();
+    const t = setInterval(tick, 3_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [open, channel.id, qc, onClose]);
+  const statusLabel = status ? (MESSAGING_STATUS_LABELS as Record<string, string>)[status] ?? status : '';
+  return (
+    <Dialog open={open} onOpenChange={() => onClose()} title="Conectar WhatsApp (QR Code)" wide footer={<Button variant="secondary" onClick={onClose}>Fechar</Button>}>
+      <div className="flex flex-col items-center gap-3 text-sm">
+        {qr ? (
+          <img src={qr} alt="QR Code de conexão do WhatsApp" width={264} height={264} className="rounded border border-slate-200" />
+        ) : (
+          <div className="flex h-[264px] w-[264px] items-center justify-center rounded border border-dashed border-slate-300 text-slate-500">
+            Aguardando o servidor emitir o QR…
+          </div>
+        )}
+        <ol className="list-decimal space-y-1 pl-5 text-left text-slate-600">
+          <li>Use o WhatsApp de um número dedicado ao negócio (não o pessoal).</li>
+          <li>No celular: WhatsApp → Configurações → Dispositivos vinculados → Conectar um dispositivo.</li>
+          <li>Escaneie o QR (ele se renova ~a cada 60 s enquanto esta tela estiver aberta).</li>
+        </ol>
+        {status && status !== 'ONBOARDING' && <Badge tone="yellow">{statusLabel}</Badge>}
+      </div>
+    </Dialog>
+  );
+}
+
 function ChannelCard({ channel }: { channel: any }) {
   const { can } = useAuth();
+  const unofficial = channel.provider === 'WHATSAPP_UNOFFICIAL_QR';
   const status = useApi<any>(['channel-status', channel.id], `/messaging/channels/${channel.id}/status`);
   const [onboarding, setOnboarding] = useState<any | null>(null);
+  const [qrOpen, setQrOpen] = useState(false);
   const [form, setForm] = useState({ wabaId: '', phoneNumberId: '', accessToken: '' });
   const [billing, setBilling] = useState(false);
   const [evidence, setEvidence] = useState({ evidenceNote: '', own: false, noCredit: false });
   const inv = [['messaging-channels'], ['channel-status', channel.id]];
-  const start = useAction((_: void) => api(`/messaging/channels/${channel.id}/onboarding/start`, { method: 'POST' }), { invalidate: inv, onSuccess: setOnboarding });
+  const start = useAction((_: void) => api(`/messaging/channels/${channel.id}/onboarding/start`, { method: 'POST' }), {
+    invalidate: inv,
+    onSuccess: (r: any) => {
+      if (r?.mode === 'qr') setQrOpen(true);
+      else setOnboarding(r);
+    },
+  });
   const complete = useAction((_: void) => api(`/messaging/channels/${channel.id}/onboarding/complete`, { method: 'POST', body: form }), { success: 'Conta oficial conectada', invalidate: inv, onSuccess: () => setOnboarding(null) });
   const disconnect = useAction((_: void) => api(`/messaging/channels/${channel.id}/disconnect`, { method: 'POST' }), { success: 'Desconectado', invalidate: inv });
   const reconnect = useAction((_: void) => api(`/messaging/channels/${channel.id}/connect`, { method: 'POST' }), { success: 'Credenciais revalidadas', invalidate: inv });
@@ -42,21 +104,41 @@ function ChannelCard({ channel }: { channel: any }) {
       <dl className="grid grid-cols-2 gap-1 text-sm">
         <dt className="text-slate-500">Número</dt>
         <dd>{channel.displayPhoneMasked ?? '—'}</dd>
-        <dt className="text-slate-500">WABA</dt>
-        <dd>{channel.externalWabaId ? `••••${channel.externalWabaId.slice(-4)}` : '—'}</dd>
-        <dt className="text-slate-500">Faturamento próprio</dt>
-        <dd>{{ UNKNOWN: 'Não verificado', PENDING_REVIEW: 'Em revisão', VERIFIED_OWN_BILLING: 'Verificado', REJECTED: 'Rejeitado' }[channel.billingStatus as string]}</dd>
-        <dt className="text-slate-500">Último webhook</dt>
-        <dd>{channel.webhookLastReceivedAt ? formatDateTimeBR(channel.webhookLastReceivedAt) : '—'}</dd>
+        {unofficial ? (
+          <>
+            <dt className="text-slate-500">Sessão</dt>
+            <dd>Baileys (não oficial)</dd>
+          </>
+        ) : (
+          <>
+            <dt className="text-slate-500">WABA</dt>
+            <dd>{channel.externalWabaId ? `••••${channel.externalWabaId.slice(-4)}` : '—'}</dd>
+            <dt className="text-slate-500">Faturamento próprio</dt>
+            <dd>{{ UNKNOWN: 'Não verificado', PENDING_REVIEW: 'Em revisão', VERIFIED_OWN_BILLING: 'Verificado', REJECTED: 'Rejeitado' }[channel.billingStatus as string]}</dd>
+            <dt className="text-slate-500">Último webhook</dt>
+            <dd>{channel.webhookLastReceivedAt ? formatDateTimeBR(channel.webhookLastReceivedAt) : '—'}</dd>
+          </>
+        )}
       </dl>
       {channel.lastError && <p className="mt-2 text-sm text-red-600">{channel.lastError}</p>}
+      {unofficial && status.data.status === 'ONBOARDING' && (
+        <Button size="sm" className="mt-2" onClick={() => setQrOpen(true)}>
+          Abrir QR de conexão
+        </Button>
+      )}
       {s && (
         <ul className="mt-3 space-y-1 text-sm">
           {[
-            ['Credenciais oficiais armazenadas (criptografadas)', s.readiness.credentialsStored],
-            ['Faturamento próprio da WABA validado', s.readiness.ownBillingVerified],
-            ['Template aprovado', s.readiness.approvedTemplates > 0],
-            ['Webhook recebido', s.readiness.webhookReceived],
+            [unofficial ? 'Sessão armazenada (criptografada)' : 'Credenciais oficiais armazenadas (criptografadas)', s.readiness.credentialsStored],
+            ...(unofficial
+              ? []
+              : ([
+                  ['Faturamento próprio da WABA validado', s.readiness.ownBillingVerified],
+                ] as [string, boolean][])),
+            ['Template pronto', s.readiness.approvedTemplates > 0],
+            ...(unofficial
+              ? []
+              : ([['Webhook recebido', s.readiness.webhookReceived]] as [string, boolean][])),
             ['Mensagem real entregue', s.readiness.realMessageDelivered],
           ].map(([label, ok]) => (
             <li key={label as string}>
@@ -71,10 +153,10 @@ function ChannelCard({ channel }: { channel: any }) {
         <div className="mt-3 flex flex-wrap gap-2">
           {['NOT_CONNECTED', 'ONBOARDING', 'DISCONNECTED', 'ERROR'].includes(channel.status) && (
             <Button size="sm" loading={start.isPending} onClick={() => start.mutate()}>
-              Conectar conta oficial
+              {unofficial ? 'Conectar via QR' : 'Conectar conta oficial'}
             </Button>
           )}
-          {channel.hasCredentials && channel.billingStatus !== 'VERIFIED_OWN_BILLING' && (
+          {!unofficial && channel.hasCredentials && channel.billingStatus !== 'VERIFIED_OWN_BILLING' && (
             <Button size="sm" variant="secondary" onClick={() => setBilling(true)}>
               Enviar evidência de faturamento
             </Button>
@@ -82,11 +164,13 @@ function ChannelCard({ channel }: { channel: any }) {
           {channel.hasCredentials && (
             <>
               <Button size="sm" variant="secondary" loading={reconnect.isPending} onClick={() => reconnect.mutate()}>
-                Revalidar
+                {unofficial ? 'Reconectar sessão' : 'Revalidar'}
               </Button>
-              <Button size="sm" variant="secondary" loading={sync.isPending} onClick={() => sync.mutate()}>
-                Sincronizar templates
-              </Button>
+              {!unofficial && (
+                <Button size="sm" variant="secondary" loading={sync.isPending} onClick={() => sync.mutate()}>
+                  Sincronizar templates
+                </Button>
+              )}
               <Button size="sm" variant="danger" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>
                 Desconectar
               </Button>
@@ -94,6 +178,7 @@ function ChannelCard({ channel }: { channel: any }) {
           )}
         </div>
       )}
+      <QrDialog channel={channel} open={qrOpen} onClose={() => setQrOpen(false)} />
       <Dialog open={Boolean(onboarding)} onOpenChange={() => setOnboarding(null)} title="Conexão oficial (BYOK)" wide footer={<Button loading={complete.isPending} disabled={!form.wabaId || !form.phoneNumberId || !form.accessToken} onClick={() => complete.mutate()}>Conectar</Button>}>
         {onboarding?.mode === 'embedded_signup' ? (
           <Alert tone="blue">Embedded Signup habilitado (config {onboarding.configId}). Conclua o fluxo da Meta e informe os IDs retornados abaixo.</Alert>
@@ -146,8 +231,11 @@ function TemplatesCard() {
   }, [q.data]);
   const save = useAction((_: void) => api('/messaging/templates', { method: 'PUT', body: { templates: rows.filter((r) => r.name && r.body) } }), { success: 'Templates salvos', invalidate: [['templates']] });
   return (
-    <Card title="Templates (devem existir e estar aprovados na sua WABA)" actions={can('messaging:manage') && <Button size="sm" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>}>
-      <p className="mb-2 text-xs text-slate-500">Variáveis permitidas (na ordem dos parâmetros do template): {MESSAGE_TEMPLATE_VARIABLES.join(', ')}. IMEI, senhas e laudos nunca são enviados.</p>
+    <Card title="Templates das mensagens" actions={can('messaging:manage') && <Button size="sm" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>}>
+      <p className="mb-2 text-xs text-slate-500">
+        Variáveis permitidas (na ordem dos parâmetros do template): {MESSAGE_TEMPLATE_VARIABLES.join(', ')}. IMEI, senhas e laudos nunca são enviados.
+        No canal oficial (Meta) o template precisa existir e estar aprovado na WABA do tenant; no canal por QR, o texto da "Prévia" enviado literalmente.
+      </p>
       <div className="space-y-3">
         {rows.map((r, i) => (
           <div key={r.eventType} className="grid gap-2 rounded border border-slate-200 p-2 sm:grid-cols-6">
@@ -173,13 +261,14 @@ export function MessagingPage() {
   const deliveries = useApi<Paginated<any>>(['deliveries', page], '/messaging/deliveries', { page });
   const [name, setName] = useState('WhatsApp da loja');
   const [scope, setScope] = useState<'branch' | 'tenant'>('tenant');
+  const [provider, setProvider] = useState<'WHATSAPP_UNOFFICIAL_QR' | 'WHATSAPP_CLOUD'>('WHATSAPP_UNOFFICIAL_QR');
   const [test, setTest] = useState({ channelId: '', to: '', eventType: 'OS_RECEIVED' });
-  const create = useAction((_: void) => api('/messaging/channels', { method: 'POST', body: { name, provider: 'WHATSAPP_CLOUD', branchId: scope === 'branch' ? branchId : null } }), { success: 'Canal criado', invalidate: [['messaging-channels']] });
+  const create = useAction((_: void) => api('/messaging/channels', { method: 'POST', body: { name, provider, branchId: scope === 'branch' ? branchId : null } }), { success: 'Canal criado', invalidate: [['messaging-channels']] });
   const sendTest = useAction((_: void) => api('/messaging/test', { method: 'POST', body: test }), { success: 'Teste enfileirado', invalidate: [['deliveries']] });
   const statusLabel: Record<string, string> = { QUEUED: 'Na fila', SENT: 'Enviada', DELIVERED: 'Entregue', READ: 'Lida', FAILED: 'Falhou', SKIPPED: 'Não enviada', BLOCKED: 'Bloqueada' };
   return (
     <div className="space-y-4">
-      <PageHeader title="WhatsApp (API oficial, conta própria)" description="Notificações de início e fim de serviço, orçamento e retirada. Sua conta Meta, seu número, seu faturamento." />
+      <PageHeader title="WhatsApp" description="Notificações de início e fim de serviço, orçamento e retirada. Conecte por QR (não oficial, mais simples) ou pela API oficial da Meta (conta própria)." />
       <QueryState loading={channels.isLoading} error={channels.error}>
         <div className="grid gap-4 lg:grid-cols-2">
           {channels.data?.map((c) => (
@@ -191,12 +280,16 @@ export function MessagingPage() {
         <Card title="Novo canal">
           <div className="flex flex-wrap gap-2">
             <Input aria-label="Nome" value={name} onChange={(e) => setName(e.target.value)} className="max-w-xs" />
+            <Select aria-label="Tipo de canal" value={provider} onChange={(e) => setProvider(e.target.value as 'WHATSAPP_UNOFFICIAL_QR' | 'WHATSAPP_CLOUD')} className="w-auto">
+              <option value="WHATSAPP_UNOFFICIAL_QR">WhatsApp por QR (não oficial)</option>
+              <option value="WHATSAPP_CLOUD">WhatsApp Oficial (Meta Cloud API)</option>
+            </Select>
             <Select aria-label="Escopo" value={scope} onChange={(e) => setScope(e.target.value as 'branch' | 'tenant')} className="w-auto">
               <option value="tenant">Toda a empresa</option>
               <option value="branch">Somente a filial atual</option>
             </Select>
             <Button loading={create.isPending} onClick={() => create.mutate()}>
-              Criar canal oficial
+              Criar canal
             </Button>
           </div>
         </Card>

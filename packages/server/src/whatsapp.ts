@@ -156,18 +156,8 @@ export class WhatsAppCloudProvider implements MessagingProvider {
 }
 
 /**
- * Adaptador NÃO OFICIAL (conexão por QR Code). Explicitamente identificado
- * como não oficial: sujeito a desconexão/restrição e sem garantia de
- * continuidade. Não incluído nesta instalação: qualquer envio falha com
- * NOT_IMPLEMENTED, nunca simula sucesso.
- */
-export class UnofficialQrProvider implements MessagingProvider {
-  readonly kind = 'WHATSAPP_UNOFFICIAL_QR' as const;
-  readonly official = false;
-  async sendTemplate(): Promise<{ providerMessageId: string }> {
-    throw new MessagingError('Adaptador não oficial (QR Code) não está habilitado nesta instalação', 'NOT_IMPLEMENTED', false);
-  }
-}
+ * Adaptador NÃO OFICIAL: implementado em ./baileys (BaileysSessionManager),
+ * canal do tipo WHATSAPP_UNOFFICIAL_QR com conexão por QR Code.
 
 /* ------------------------------------------------ webhook payload parsing */
 

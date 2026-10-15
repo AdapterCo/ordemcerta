@@ -46,6 +46,11 @@ Navegador ──HTTPS──> Traefik ──/────────────
   - contestação **perdida** (`charged_back/settled`): suspensão imediata **sem tolerância**, empresa SUSPENDED (dados preservados, somente leitura), demais faturas abertas anuladas, mudanças de plano pendentes canceladas (pró-rata contestada volta ao plano anterior), cartão desvinculado (PreApproval cancelado no MP; falha fica em `provider_cancel_pending` e a reconciliação tenta de novo), modo PIX_MANUAL e nova fatura `REGULARIZATION` com vencimento imediato. O pagamento dela reabre o ciclo a partir da data do pagamento. Proprietários recebem e-mail `chargeback_suspended`; auditoria `chargeback_lost_suspended` visível em Plataforma › Reconciliação.
   - Pelo tópico `payment` a cobertura do provedor não é conhecida; por isso o tópico "Contestações" deve estar marcado no painel do Mercado Pago.
 
-## WhatsApp (BYOK)
+## WhatsApp
 
-Interface `MessagingProvider`; adaptador oficial (Cloud API) por padrão; adaptador QR explicitamente não oficial e desabilitado. Envio somente com canal `ACTIVE`, que exige faturamento próprio da WABA validado (evidência auditável revisada pela plataforma). Webhook validado por `X-Hub-Signature-256`; tenant derivado do `phone_number_id` cadastrado. Opt-out por palavras-chave. Variáveis permitidas sem IMEI/senha/laudo.
+**Canal padrão: não oficial por QR (`WHATSAPP_UNOFFICIAL_QR`, Baileys)**, opt-in o oficial (Cloud API da Meta, BYOK).
+
+- **Não oficial (Baileys)**: sessão de WhatsApp Web multi-device por canal, um "dispositivo vinculado" no WhatsApp do tenant; a sessão é criptografada (AES-256-GCM) em `messaging_channels`.encrypted_credentials_ref. Sockets rodam no worker; o QR (PNG data URL) é publicado no Redis (`baileys:qr:<channelId>`, TTL curto) e lido pela API. Status de entrega e mensagens recebidas chegam pelo próprio socket (não há webhook). Configuração não oficial: sujeita a desconexão/restrição pela Meta — usar número dedicado do negócio, sem disparos em massa.
+- **Oficial (Cloud API)**: `MessagingProvider` com adaptador Cloud API; envio somente com canal `ACTIVE`, que exige faturamento próprio da WABA validado (evidência auditável revisada pela plataforma). Webhook validado por `X-Hub-Signature-256`; tenant derivado do `phone_number_id` cadastrado. Requer as variáveis `META_*`.
+
+Ambos: opt-out por palavras-chave; variáveis permitidas sem IMEI/senha/laudo; só canal `ACTIVE` envia.

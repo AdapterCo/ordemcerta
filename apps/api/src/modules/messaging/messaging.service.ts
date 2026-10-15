@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
-  MessagingError,
   OPT_OUT_KEYWORDS,
   parseWhatsAppInbound,
   parseWhatsAppStatuses,
@@ -25,7 +24,7 @@ import { assertBranch, auth, currentTenantId } from '../../core/context';
 import { SystemPrisma, TenantDb } from '../../core/database';
 import { ENV, type AppEnv } from '../../core/env.provider';
 import { Errors } from '../../core/errors';
-import { AuditService, CryptoService, QueueService } from '../../core/services';
+import { AuditService, CryptoService, QueueService, RedisService } from '../../core/services';
 
 export const deliveriesQuery = paginationSchema.extend({
   status: z.enum(['QUEUED', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'SKIPPED', 'BLOCKED']).optional(),
@@ -50,6 +49,7 @@ export class MessagingService {
     private readonly crypto: CryptoService,
     private readonly audit: AuditService,
     private readonly queues: QueueService,
+    private readonly redis: RedisService,
     @Inject(ENV) private readonly env: AppEnv,
   ) {
     this.provider = new WhatsAppCloudProvider(env.META_GRAPH_VERSION, env.META_APP_ID, env.META_APP_SECRET);
@@ -87,27 +87,49 @@ export class MessagingService {
   status(id: string) {
     return this.db.run(async (tx) => {
       const c = await this.loadChannel(tx, id);
-      const approvedTemplates = await tx.messageTemplate.count({ where: { tenantId: c.tenantId, enabled: true, approvalStatus: 'APPROVED' } });
+      const unofficial = c.provider === 'WHATSAPP_UNOFFICIAL_QR';
+      const approvedTemplates = unofficial
+        ? await tx.messageTemplate.count({ where: { tenantId: c.tenantId, enabled: true, body: { not: '' } } })
+        : await tx.messageTemplate.count({ where: { tenantId: c.tenantId, enabled: true, approvalStatus: 'APPROVED' } });
       return {
         ...this.view(c),
         official: c.provider === 'WHATSAPP_CLOUD',
         readiness: {
           credentialsStored: Boolean(c.encryptedCredentialsRef),
-          ownBillingVerified: c.billingStatus === 'VERIFIED_OWN_BILLING',
+          ownBillingVerified: unofficial || c.billingStatus === 'VERIFIED_OWN_BILLING',
           approvedTemplates,
-          webhookReceived: Boolean(c.webhookLastReceivedAt),
+          webhookReceived: unofficial || Boolean(c.webhookLastReceivedAt),
           realMessageDelivered: Boolean(c.firstDeliveredAt),
-          ready: c.status === 'ACTIVE' && Boolean(c.webhookLastReceivedAt) && Boolean(c.firstDeliveredAt) && approvedTemplates > 0,
+          ready: c.status === 'ACTIVE' && Boolean(c.firstDeliveredAt) && approvedTemplates > 0,
         },
-        notice: 'Tarifas e regras de cobrança das mensagens são definidas pela Meta e cobradas diretamente na conta do cliente; podem mudar. Valores exibidos aqui são operacionais/estimados, não fatura da Meta.',
+        notice: unofficial
+          ? 'Canal não oficial (conexão por QR Code): sem WABA/ billing Meta; sujeito a desconexão ou restrição pela Meta. Use um número dedicado do negócio.'
+          : 'Tarifas e regras de cobrança das mensagens são definidas pela Meta e cobradas diretamente na conta do cliente; podem mudar. Valores exibidos aqui são operacionais/estimados, não fatura da Meta.',
       };
     });
   }
 
   startOnboarding(id: string) {
-    return this.db.run(async (tx) => {
+    return this.db.run(async (tx, hooks) => {
       const c = await this.loadChannel(tx, id);
-      if (c.provider !== 'WHATSAPP_CLOUD') throw new MessagingError('Adaptador não oficial (QR Code) não está habilitado nesta instalação', 'NOT_IMPLEMENTED', false);
+      if (c.provider === 'WHATSAPP_UNOFFICIAL_QR') {
+        // Baileys: a sessão roda no worker; o QR fica em Redis, lido via GET .../qr.
+        await tx.messagingChannel.update({ where: { id }, data: { status: 'ONBOARDING' } });
+        hooks.afterCommit(() => {
+          void this.queues.add('messaging', 'session-start', { channelId: id, tenantId: c.tenantId });
+        });
+        await this.audit.log(tx, { action: 'messaging_onboarding_started', entity: 'messaging_channel', entityId: id, metadata: { provider: 'WHATSAPP_UNOFFICIAL_QR' } });
+        return {
+          mode: 'qr',
+          instructions: [
+            'Use o WhatsApp com um número dedicado do negócio (não use o número pessoal).',
+            'No celular: WhatsApp > Configurações > Dispositivos vinculados > Conectar um dispositivo.',
+            'Leia o QR em até ~60 segundos (renovado automaticamente enquanto a tela estiver aberta).',
+            'O canal fica ATIVO assim que o emparelhamento terminar; a sessão fica criptografada no servidor.',
+          ],
+        };
+      }
+      if (c.provider !== 'WHATSAPP_CLOUD') throw Errors.precondition('Provedor de canal não suportado');
       if (!this.provider.isConfigured || !this.env.META_WEBHOOK_VERIFY_TOKEN) throw Errors.integrationNotConfigured('WhatsApp Business Platform (Meta)');
       await tx.messagingChannel.update({ where: { id }, data: { status: 'ONBOARDING' } });
       await this.audit.log(tx, { action: 'messaging_onboarding_started', entity: 'messaging_channel', entityId: id });
@@ -124,6 +146,13 @@ export class MessagingService {
         ],
       };
     });
+  }
+
+  /** QR do canal não oficial (data URL PNG, lido do Redis). null = aguardando emissão junto ao worker. */
+  async qr(id: string) {
+    const c = await this.db.run((tx) => this.loadChannel(tx, id));
+    const qr = c.encryptedCredentialsRef || c.status !== 'ONBOARDING' ? null : await this.redis.client.get(`baileys:qr:${id}`);
+    return { qr, status: c.status };
   }
 
   /** Conclui a conexão: valida propriedade número↔WABA, inscreve webhooks e guarda token criptografado. */
@@ -168,12 +197,21 @@ export class MessagingService {
     });
   }
 
-  /** Reconexão: revalida o token armazenado. */
+  /** Reconexão: oficial revalida o token; canal QR religa a sessão com credenciais salvas. */
   connect(id: string) {
-    return this.db.run(async (tx) => {
+    return this.db.run(async (tx, hooks) => {
       const c = await this.loadChannel(tx, id);
-      if (!c.encryptedCredentialsRef) throw Errors.precondition('Conclua a conexão oficial antes');
-      const creds = this.credentials(c.encryptedCredentialsRef);
+      if (c.provider === 'WHATSAPP_UNOFFICIAL_QR') {
+        if (!c.encryptedCredentialsRef) throw Errors.precondition('Sem sessão armazenada — gere um novo QR');
+        await tx.messagingChannel.update({ where: { id }, data: { status: 'ONBOARDING', lastError: null } });
+        hooks.afterCommit(() => {
+          void this.queues.add('messaging', 'session-stop', { channelId: id });
+          void this.queues.add('messaging', 'session-start', { channelId: id });
+        });
+        await this.audit.log(tx, { action: 'messaging_session_reconnecting', entity: 'messaging_channel', entityId: id, metadata: { provider: 'WHATSAPP_UNOFFICIAL_QR' } });
+        return this.view(c);
+      }
+      const creds = this.credentials(c.encryptedCredentialsRef!);
       try {
         await this.provider.getPhoneNumber(creds.phoneNumberId, creds.accessToken);
       } catch (e) {
@@ -189,8 +227,11 @@ export class MessagingService {
 
   /** Desconexão desabilita imediatamente novos envios e descarta credenciais; histórico preservado. */
   disconnect(id: string) {
-    return this.db.run(async (tx) => {
-      await this.loadChannel(tx, id);
+    return this.db.run(async (tx, hooks) => {
+      const c = await this.loadChannel(tx, id);
+      hooks.afterCommit(() => {
+        void this.queues.add('messaging', 'session-stop', { channelId: id, logout: true });
+      });
       const u = await tx.messagingChannel.update({
         where: { id },
         data: { status: 'DISCONNECTED', encryptedCredentialsRef: null, disconnectedAt: new Date(), version: { increment: 1 } },
