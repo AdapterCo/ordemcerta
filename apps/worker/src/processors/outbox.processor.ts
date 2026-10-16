@@ -3,7 +3,7 @@ import { Prisma, type NotificationOutbox } from '@prisma/client';
 import { isUniqueViolation, sha256Hex } from '@ordemcerta/server';
 import { maskPhone } from '@ordemcerta/shared';
 import { Deps } from '../deps';
-import { OUTBOX_TO_MESSAGING, quietHoursDelay } from '../messaging-render';
+import { deliveryJobId, OUTBOX_TO_MESSAGING, quietHoursDelay } from '../messaging-render';
 
 /**
  * Despacho do outbox transacional. Claim com FOR UPDATE SKIP LOCKED (várias
@@ -121,7 +121,8 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
         const quiet = (quietSetting?.valueJson as { start: string; end: string } | null | undefined) ?? { start: '21:00', end: '08:00' };
         const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } });
         const delay = quietHoursDelay(new Date(), quiet, tenant?.timezone ?? 'America/Sao_Paulo');
-        await this.deps.queue('messaging').add('send', { deliveryId: d.id, tenantId }, { delay, jobId: `delivery:${d.id}` });
+        // jobId sem ":" — o BullMQ recusa ("Custom Id cannot contain :") e o envio ficaria parado na fila
+        await this.deps.queue('messaging').add('send', { deliveryId: d.id, tenantId }, { delay, jobId: deliveryJobId(d.id) });
       }
     } catch (e) {
       if (isUniqueViolation(e)) return; // já registrado (reprocessamento sem duplicar mensagem)

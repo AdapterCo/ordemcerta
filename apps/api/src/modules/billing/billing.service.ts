@@ -292,7 +292,7 @@ export class BillingService {
       if (isUniqueViolation(e)) return { accepted: true, duplicate: true };
       throw e;
     }
-    await this.queues.add('billing', 'webhook', { kind: 'webhook', eventId: event.id }, { jobId: `webhook:${event.id}` });
+    await this.queues.add('billing', 'webhook', { kind: 'webhook', eventId: event.id }, { jobId: `webhook-${event.id}` });
     return { accepted: true };
   }
 }

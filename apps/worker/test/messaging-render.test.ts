@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { messageVariables, OUTBOX_TO_MESSAGING, quietHoursDelay } from '../src/messaging-render';
+import { deliveryJobId, messageVariables, OUTBOX_TO_MESSAGING, quietHoursDelay } from '../src/messaging-render';
 
 describe('messaging render', () => {
+  it('jobId do envio não tem ":" (o BullMQ recusa e a mensagem ficaria parada na fila)', () => {
+    const id = deliveryJobId('01a140bd-60d9-7551-89eb-a6b51070071b');
+    expect(id).not.toContain(':');
+    expect(id).toBe('delivery-01a140bd-60d9-7551-89eb-a6b51070071b');
+  });
+
   it('exposes only allowed variables and no sensitive data', () => {
     const v = messageVariables({
       customerName: 'Maria da Silva',

@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Deps } from '../deps';
+import { deliveryJobId } from '../messaging-render';
 
 /**
  * Rotinas de manutenção: expiração de orçamentos, purga de senhas de
@@ -16,6 +17,30 @@ export class MaintenanceProcessor implements OnModuleInit {
     } catch (e) {
       this.deps.log.error({ err: (e as Error).message }, 'falha ao agendar manutenção');
     }
+    void this.requeueStuckDeliveries().catch((e) => this.deps.log.error({ err: (e as Error).message }, 'falha ao reenfileirar envios'));
+  }
+
+  /**
+   * Envios "Na fila" sem job no BullMQ (ex.: falha ao enfileirar): reenfileira os recentes
+   * (o jobId fixo evita duplicar quem já está na fila/agendado para depois do horário de silêncio)
+   * e encerra os antigos, para o cliente não receber notificação de um evento de dias atrás.
+   */
+  async requeueStuckDeliveries() {
+    const { db, log } = this.deps;
+    const now = Date.now();
+    const old = await db.messageDelivery.updateMany({
+      where: { status: 'QUEUED', createdAt: { lt: new Date(now - 24 * 3600_000) } },
+      data: { status: 'SKIPPED', lastError: 'Não enviada a tempo (mais de 24 h na fila); evento antigo não é reenviado' },
+    });
+    const stuck = await db.messageDelivery.findMany({
+      where: { status: 'QUEUED', createdAt: { gte: new Date(now - 24 * 3600_000), lt: new Date(now - 2 * 60_000) } },
+      select: { id: true, tenantId: true },
+      take: 500,
+    });
+    for (const d of stuck) {
+      await this.deps.queue('messaging').add('send', { deliveryId: d.id, tenantId: d.tenantId }, { jobId: deliveryJobId(d.id) });
+    }
+    if (old.count || stuck.length) log.info({ requeued: stuck.length, expired: old.count }, 'envios parados na fila tratados');
   }
 
   async run() {
@@ -43,6 +68,8 @@ export class MaintenanceProcessor implements OnModuleInit {
       where: { status: 'DONE', expiresAt: { lt: now } },
       data: { status: 'FAILED', error: 'expirada', content: null, contentType: null },
     });
+    await this.requeueStuckDeliveries();
+
     // Credenciais e tokens vencidos (sem valor de auditoria: os eventos ficam em audit_logs)
     const day = 86_400_000;
     const sessions = await db.session.deleteMany({

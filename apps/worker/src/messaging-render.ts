@@ -45,6 +45,11 @@ export function messageVariables(c: RenderContext): Record<string, string> {
 }
 
 /** Delay (ms) até o fim do horário silencioso configurado, ou 0. */
+/** Id do job de envio: estável (deduplica) e SEM ":" — o BullMQ recusa ids com dois-pontos. */
+export function deliveryJobId(deliveryId: string): string {
+  return `delivery-${deliveryId}`;
+}
+
 export function quietHoursDelay(now: Date, quiet: { start: string; end: string } | null, timezone: string): number {
   if (!quiet) return 0;
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' }).formatToParts(now);
