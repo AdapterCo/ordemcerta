@@ -443,14 +443,19 @@ function PartPurchases({ o }: { o: Order }) {
       }),
     { success: 'Compra de peça registrada', invalidate: [...inv, ['cash-current']], onSuccess: () => setForm(emptyPurchase) },
   );
-  const doCancel = useAction((_: void) => api(`/service-orders/${o.id}/part-purchases/${cancel.id}/cancel`, { method: 'POST', body: { reason } }), {
-    success: 'Compra cancelada',
-    invalidate: [...inv],
-    onSuccess: () => {
-      setCancel(null);
-      setReason('');
+  const [refundSession, setRefundSession] = useState('');
+  const doCancel = useAction(
+    (_: void) => api(`/service-orders/${o.id}/part-purchases/${cancel.id}/cancel`, { method: 'POST', body: { reason, refundCashSessionId: refundSession || null } }),
+    {
+      success: 'Compra cancelada',
+      invalidate: [...inv, ['cash-current']],
+      onSuccess: () => {
+        setCancel(null);
+        setReason('');
+        setRefundSession('');
+      },
     },
-  });
+  );
   const active = (o.partPurchases ?? []).filter((p: any) => !p.canceledAt);
   const totalCost = active.reduce((s: number, p: any) => s + p.totalCostCents, 0);
   const total = form.qty * form.unitCostCents;
@@ -565,12 +570,26 @@ function PartPurchases({ o }: { o: Order }) {
         open={Boolean(cancel)}
         onOpenChange={() => setCancel(null)}
         title={`Cancelar compra: ${cancel?.description ?? ''}`}
-        description={cancel?.cashMovementId ? 'O valor volta para o caixa (suprimento) se ele ainda estiver aberto.' : 'O custo sai da margem da OS.'}
+        description={cancel?.cashMovementId ? 'Se o caixa em que a peça foi paga ainda estiver aberto, o valor volta para ele (suprimento).' : 'O custo sai da margem da OS.'}
         danger
         loading={doCancel.isPending}
         onConfirm={() => doCancel.mutate()}
       >
-        <Textarea aria-label="Motivo" placeholder="Motivo do cancelamento (mín. 5 caracteres)" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <div className="space-y-3">
+          <Textarea aria-label="Motivo" placeholder="Motivo do cancelamento (mín. 5 caracteres)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          {cancel?.cashMovementId && (
+            <Field label="Se aquele caixa já foi fechado" htmlFor="refund-session" hint="Escolha onde o dinheiro devolvido entra, ou indique que ele não voltou para o caixa.">
+              <Select id="refund-session" value={refundSession} onChange={(e) => setRefundSession(e.target.value)}>
+                <option value="">O dinheiro não voltou para o caixa</option>
+                {branchSessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    Devolver no {s.register.name} (aberto)
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+        </div>
       </ConfirmDialog>
     </>
   );

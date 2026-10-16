@@ -67,6 +67,11 @@ export function emailTemplate(template: string, data: Record<string, string>): E
         subject: 'Redefinição de senha — OrdemCerta',
         text: `Olá ${d('name')},\n\nRecebemos uma solicitação para redefinir sua senha. Use o link abaixo (válido por 30 minutos, uso único):\n${d('link')}\n\nSe você não solicitou, ignore este e-mail.`,
       };
+    case 'email_verification':
+      return {
+        subject: 'Confirme seu e-mail — OrdemCerta',
+        text: `Olá ${d('name')},\n\nConfirme que este e-mail é seu pelo link abaixo (válido por 24 horas, uso único):\n${d('link')}\n\nSe você não reconhece esta solicitação, ignore este e-mail.`,
+      };
     case 'subscription_activated':
       return {
         subject: 'Assinatura ativada — OrdemCerta',

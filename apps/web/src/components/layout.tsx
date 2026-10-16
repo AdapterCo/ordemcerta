@@ -188,11 +188,16 @@ export function AppLayout() {
       </div>
       <div className="safe-bottom border-t border-white/[0.08] px-4 py-4 md:max-lg:px-2">
         <div className="flex items-center gap-3 md:max-lg:flex-col md:max-lg:gap-2">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500/20 font-mono text-xs font-semibold text-brand-200">{initials}</span>
-          <div className="min-w-0 flex-1 md:max-lg:sr-only">
-            <p className="truncate text-sm font-semibold text-white">{me!.user.name}</p>
-            <p className="truncate text-xs text-white/45">{current.tenant.name}</p>
-          </div>
+          <Link to="/app/profile" title="Meu perfil" className="flex min-w-0 flex-1 items-center gap-3 rounded-lg transition-colors hover:bg-white/[0.05] md:max-lg:flex-none">
+            <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500/20 font-mono text-xs font-semibold text-brand-200">
+              {initials}
+              {!me!.user.emailVerified && <span aria-label="E-mail não confirmado" className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-signal-400 ring-2 ring-ink-900" />}
+            </span>
+            <div className="min-w-0 flex-1 md:max-lg:sr-only">
+              <p className="truncate text-sm font-semibold text-white">{me!.user.name}</p>
+              <p className="truncate text-xs text-white/45">{current.tenant.name} · Meu perfil</p>
+            </div>
+          </Link>
           <button type="button" onClick={() => void logout()} aria-label="Sair" title="Sair" className="rounded-lg p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white">
             <LogOut className="h-4 w-4" />
           </button>

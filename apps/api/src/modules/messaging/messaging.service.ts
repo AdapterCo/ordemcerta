@@ -114,9 +114,11 @@ export class MessagingService {
       const c = await this.loadChannel(tx, id);
       if (c.provider === 'WHATSAPP_UNOFFICIAL_QR') {
         // Baileys: a sessão roda no worker; o QR fica em Redis, lido via GET .../qr.
-        await tx.messagingChannel.update({ where: { id }, data: { status: 'ONBOARDING' } });
+        // Pareamento novo do zero: descarta sessão antiga (se houver) para o QR sempre aparecer.
+        await tx.messagingChannel.update({ where: { id }, data: { status: 'ONBOARDING', encryptedCredentialsRef: null, lastError: null } });
+        await this.redis.client.del(`baileys:qr:${id}`);
         hooks.afterCommit(() => {
-          void this.queues.add('messaging', 'session-start', { channelId: id, tenantId: c.tenantId });
+          void this.queues.add('messaging', 'session-restart', { channelId: id, tenantId: c.tenantId, fresh: true });
         });
         await this.audit.log(tx, { action: 'messaging_onboarding_started', entity: 'messaging_channel', entityId: id, metadata: { provider: 'WHATSAPP_UNOFFICIAL_QR' } });
         return {
@@ -151,8 +153,10 @@ export class MessagingService {
   /** QR do canal não oficial (data URL PNG, lido do Redis). null = aguardando emissão junto ao worker. */
   async qr(id: string) {
     const c = await this.db.run((tx) => this.loadChannel(tx, id));
-    const qr = c.encryptedCredentialsRef || c.status !== 'ONBOARDING' ? null : await this.redis.client.get(`baileys:qr:${id}`);
-    return { qr, status: c.status };
+    // O QR só existe no Redis enquanto aguarda leitura (o worker apaga ao conectar); as credenciais
+    // podem ser gravadas antes do pareamento terminar, então não servem de critério.
+    const qr = c.provider === 'WHATSAPP_UNOFFICIAL_QR' && c.status === 'ONBOARDING' ? await this.redis.client.get(`baileys:qr:${id}`) : null;
+    return { qr, status: c.status, lastError: c.lastError };
   }
 
   /** Conclui a conexão: valida propriedade número↔WABA, inscreve webhooks e guarda token criptografado. */
@@ -204,9 +208,9 @@ export class MessagingService {
       if (c.provider === 'WHATSAPP_UNOFFICIAL_QR') {
         if (!c.encryptedCredentialsRef) throw Errors.precondition('Sem sessão armazenada — gere um novo QR');
         await tx.messagingChannel.update({ where: { id }, data: { status: 'ONBOARDING', lastError: null } });
+        // um job só (para e liga em sequência): dois jobs separados poderiam rodar fora de ordem
         hooks.afterCommit(() => {
-          void this.queues.add('messaging', 'session-stop', { channelId: id });
-          void this.queues.add('messaging', 'session-start', { channelId: id });
+          void this.queues.add('messaging', 'session-restart', { channelId: id, tenantId: c.tenantId, fresh: false });
         });
         await this.audit.log(tx, { action: 'messaging_session_reconnecting', entity: 'messaging_channel', entityId: id, metadata: { provider: 'WHATSAPP_UNOFFICIAL_QR' } });
         return this.view(c);
@@ -335,9 +339,14 @@ export class MessagingService {
     return this.db.run(async (tx, hooks) => {
       const tenantId = currentTenantId();
       const c = await this.loadChannel(tx, input.channelId);
-      if (c.status !== 'ACTIVE') throw Errors.precondition('Canal não está ativo (faturamento próprio não validado ou desconectado)');
-      const tpl = await tx.messageTemplate.findFirst({ where: { tenantId, eventType: input.eventType, enabled: true, approvalStatus: 'APPROVED' } });
-      if (!tpl) throw Errors.precondition('Não há template aprovado e habilitado para este evento');
+      if (c.status !== 'ACTIVE') throw Errors.precondition('Canal não está ativo (desconectado, aguardando QR ou faturamento próprio não validado)');
+      const official = c.provider === 'WHATSAPP_CLOUD';
+      const tpl = await tx.messageTemplate.findFirst({
+        where: official
+          ? { tenantId, eventType: input.eventType, enabled: true, approvalStatus: 'APPROVED' }
+          : { tenantId, eventType: input.eventType, enabled: true, body: { not: '' } },
+      });
+      if (!tpl) throw Errors.precondition(official ? 'Não há template aprovado e habilitado para este evento' : 'A mensagem deste evento não está ativa ou está sem texto');
       const customer = await tx.customer.findFirst({ where: { tenantId, OR: [{ whatsappE164: input.to }, { phoneE164: input.to }] } });
       if (!customer) throw Errors.validation('O número de teste precisa estar cadastrado como cliente (com consentimento)');
       const eventId = randomUUID();

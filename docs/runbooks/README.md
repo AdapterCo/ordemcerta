@@ -17,7 +17,9 @@ Prefixo de comando em produção: `DC="docker compose -f docker-compose.yml -f d
 
 ## Backup e restauração
 
-- Diário (cron): `set -a; . ./.env; set +a; ./infra/backup/backup.sh`
+- Diário (cron): `set -a; . ./.env; set +a; ./infra/backup/backup.sh`. Exemplo de `crontab -e` (03:30 todo dia):
+  `30 3 * * * cd /root/ordemcerta && set -a && . ./.env && set +a && ./infra/backup/backup.sh >> /var/log/ordemcerta-backup.log 2>&1`
+- Cópia externa: instale e configure o `rclone` e defina `BACKUP_RCLONE_REMOTE` no `.env` — o script copia cada backup novo automaticamente.
 - Mensal: `./infra/backup/restore-test.sh` (banco temporário; registre o resultado).
 
 ## Incidentes

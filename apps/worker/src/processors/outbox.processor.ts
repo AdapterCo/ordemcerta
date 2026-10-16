@@ -85,14 +85,18 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
     const recipient = customer.whatsappE164 ?? customer.phoneE164;
     const channel =
       channels.find((c) => c.status === 'ACTIVE' && c.branchId === p.branchId) ?? channels.find((c) => c.status === 'ACTIVE' && !c.branchId) ?? null;
-    const template = await db.messageTemplate.findFirst({ where: { tenantId, eventType, enabled: true, approvalStatus: 'APPROVED' } });
+    // Canal oficial: template aprovado na WABA. Canal por QR (Baileys): texto local habilitado e preenchido.
+    const official = channel?.provider === 'WHATSAPP_CLOUD';
+    const template = await db.messageTemplate.findFirst({
+      where: official ? { tenantId, eventType, enabled: true, approvalStatus: 'APPROVED' } : { tenantId, eventType, enabled: true, body: { not: '' } },
+    });
     const consent = await db.customerConsent.findFirst({
       where: { tenantId, customerId: customer.id, channel: 'WHATSAPP', purpose: 'SERVICE_NOTIFICATIONS', revokedAt: null },
     });
     let skip: string | null = null;
     if (!recipient) skip = 'Cliente sem telefone';
-    else if (!channel) skip = 'Canal WhatsApp oficial não ativo (faturamento próprio pendente ou desconectado)';
-    else if (!template) skip = 'Template não aprovado/habilitado para este evento';
+    else if (!channel) skip = 'Nenhum canal WhatsApp ativo (desconectado, aguardando QR ou faturamento próprio pendente)';
+    else if (!template) skip = official ? 'Template não aprovado/habilitado para este evento' : 'Mensagem deste evento não está ativa (WhatsApp › Templates)';
     else if (!consent) skip = 'Cliente sem opt-in para notificações por WhatsApp';
 
     const dedupeKey = sha256Hex(`${ev.eventId}:${template?.id ?? eventType}:${recipient ?? customer.id}`);

@@ -195,6 +195,48 @@ export function ForgotPasswordPage() {
   );
 }
 
+/** Link do e-mail de confirmação (token no fragmento #token=..., nunca enviado em logs). */
+export function VerifyEmailPage() {
+  const token = fragmentParam('token');
+  const { me, reload } = useAuth();
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+  const confirm = async () => {
+    setState('busy');
+    try {
+      await api('/auth/email/verify', { method: 'POST', body: { token } });
+      setState('done');
+      if (me) await reload();
+    } catch (e) {
+      setMessage(errorMessage(e));
+      setState('error');
+    }
+  };
+  return (
+    <AuthLayout title="Confirmar e-mail" subtitle="Confirme que este endereço de e-mail é seu.">
+      <div className="space-y-4">
+        {!token ? (
+          <Alert tone="red">Link inválido. Peça um novo em Meu perfil.</Alert>
+        ) : state === 'done' ? (
+          <>
+            <Alert tone="green" title="E-mail confirmado">Obrigado! Seu e-mail foi confirmado.</Alert>
+            <Link to={me ? '/app/profile' : '/login'} className="block text-center text-sm font-medium text-brand-700 hover:underline">
+              {me ? 'Voltar ao perfil' : 'Entrar'}
+            </Link>
+          </>
+        ) : (
+          <>
+            {state === 'error' && <Alert tone="red">{message || 'Link inválido ou expirado. Peça um novo em Meu perfil.'}</Alert>}
+            <Button className="w-full" loading={state === 'busy'} onClick={() => void confirm()}>
+              Confirmar meu e-mail
+            </Button>
+          </>
+        )}
+      </div>
+    </AuthLayout>
+  );
+}
+
 const resetForm = z.object({ password: passwordSchema, confirm: z.string() }).refine((v) => v.password === v.confirm, { message: 'As senhas não conferem', path: ['confirm'] });
 
 export function ResetPasswordPage() {

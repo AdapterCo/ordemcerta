@@ -32,6 +32,13 @@ export class SessionService {
           this.log.warn({ channelId, reason }, 'baileys: sessão perdida');
           await this.deps.db.messagingChannel.updateMany({ where: { id: channelId, provider: 'WHATSAPP_UNOFFICIAL_QR' }, data: { lastError: reason } });
         },
+        onQrExpired: async (channelId) => {
+          this.log.info({ channelId }, 'baileys: QR expirou sem leitura');
+          await this.deps.db.messagingChannel.updateMany({
+            where: { id: channelId, provider: 'WHATSAPP_UNOFFICIAL_QR', status: 'ONBOARDING' },
+            data: { status: 'DISCONNECTED', encryptedCredentialsRef: null, lastError: 'O QR expirou sem ser lido. Clique em "Conectar via QR" para gerar outro.' },
+          });
+        },
         onStatus: async (channelId, updates) => this.applyStatusUpdates(channelId, updates),
         onInbound: async (channelId, messages) => this.applyInbound(channelId, messages),
       },
@@ -181,6 +188,16 @@ export class SessionService {
       // QR novo: sessão sem credenciais salva (ou após deslog)
       this.manager.connect(channel.id, undefined);
     }
+  }
+
+  /**
+   * Reinício em sequência (job session-restart): para e liga de novo no mesmo job.
+   * fresh=true: pareamento novo — desvincula a sessão anterior no WhatsApp e gera QR.
+   */
+  async restartSession(channelId: string, fresh: boolean) {
+    await this.manager.stopSession(channelId, { logout: fresh });
+    await this.deps.redis.del(QR_KEY(channelId));
+    await this.startSession(channelId);
   }
 
   /** Encerra a sessão (job session-stop); logout remove o vínculo no WhatsApp. */

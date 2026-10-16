@@ -11,7 +11,9 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 120_000,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
+    // um processo, um arquivo por vez (banco compartilhado). Vitest 4: substitui poolOptions.forks.singleFork
+    maxWorkers: 1,
+    fileParallelism: false,
     sequence: { concurrent: false },
   },
 });

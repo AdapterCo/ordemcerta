@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, refreshSession, setAccessToken, setOnSessionLost } from './api';
 
 export interface Me {
-  user: { id: string; name: string; email: string; platformRole: 'PLATFORM_SUPERADMIN' | null; mfaEnabled: boolean; mfaVerified: boolean };
+  user: { id: string; name: string; email: string; platformRole: 'PLATFORM_SUPERADMIN' | null; mfaEnabled: boolean; mfaVerified: boolean; emailVerified: boolean };
   tenants: Array<{ tenantId: string; name: string; status: string; role: string }>;
   current: null | {
     tenant: { id: string; name: string; timezone: string; primaryColor: string | null; onboardingCompletedAt: string | null; status: string };

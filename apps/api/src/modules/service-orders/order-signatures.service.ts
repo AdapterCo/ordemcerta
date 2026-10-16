@@ -88,7 +88,8 @@ export class OrderSignaturesService {
   async consumeCapture(tx: Tx, order: Pick<ServiceOrder, 'id' | 'tenantId'>, captureId: string, purpose: Extract<TermType, 'INTAKE' | 'PICKUP'>) {
     const c = await tx.signatureCapture.findFirst({ where: { id: captureId, tenantId: order.tenantId, orderId: order.id, purpose } });
     if (!c || !c.capturedAt || !c.content || !c.signerName) throw Errors.precondition('A assinatura do celular ainda não foi recebida');
-    const used = await tx.signatureCapture.updateMany({ where: { id: c.id, consumedAt: null }, data: { consumedAt: new Date() } });
+    // a imagem segue para o arquivo do termo (buf abaixo): não mantém cópia duplicada (LGPD)
+    const used = await tx.signatureCapture.updateMany({ where: { id: c.id, consumedAt: null }, data: { consumedAt: new Date(), content: null } });
     if (!used.count) throw Errors.conflict('Esta assinatura já foi utilizada');
     return { buf: Buffer.from(c.content), signerName: c.signerName };
   }

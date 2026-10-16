@@ -53,6 +53,8 @@ export interface BaileysEvents {
   onLoggedOut(channelId: string): void;
   /** Reconexões automáticas falhando repetidamente (sessão segue tentando). */
   onSessionLost(channelId: string, reason: string): void;
+  /** QR expirou sem ninguém ler (sessão encerrada; o usuário gera outro quando quiser). */
+  onQrExpired(channelId: string): void;
   /** Updates de status das mensagens enviadas. */
   onStatus(channelId: string, updates: BaileysStatusUpdate[]): void;
   /** Mensagens recebidas de clientes (para opt-out por palavra-chave). */
@@ -176,8 +178,10 @@ export class BaileysSessionManager {
     });
     this.sockets.set(channelId, sock);
 
-    sock.ev.on('creds.update', () => this.scheduleSave(channelId));
-    sock.ev.on('connection.update', (u) => void this.handleConnectionChange(channelId, u));
+    sock.ev.on('creds.update', () => {
+      if (this.sockets.get(channelId) === sock) this.scheduleSave(channelId);
+    });
+    sock.ev.on('connection.update', (u) => void this.handleConnectionChange(channelId, sock, u));
     sock.ev.on('messages.upsert', (up) => {
       if (up.type !== 'notify') return;
       const msgs: BaileysInboundMessage[] = [];
@@ -201,8 +205,10 @@ export class BaileysSessionManager {
     });
   }
 
-  private async handleConnectionChange(channelId: string, u: Partial<ConnectionState>) {
-    if (this.stopped) return;
+  private async handleConnectionChange(channelId: string, sock: WASocket, u: Partial<ConnectionState>) {
+    // Socket antigo (sessão parada/reiniciada): ignora, senão o "close" dele agendaria
+    // uma reconexão fantasma e o QR seria gerado sem fim.
+    if (this.stopped || this.sockets.get(channelId) !== sock) return;
     if (u.qr) {
       try {
         this.events.onQr(channelId, await QRCode.toDataURL(u.qr, { margin: 1, width: 320 }));
@@ -225,6 +231,23 @@ export class BaileysSessionManager {
       if (code === DisconnectReason.loggedOut) {
         await this.stopSession(channelId);
         this.events.onLoggedOut(channelId);
+        return;
+      }
+      const paired = Boolean(this.auths.get(channelId)?.state.creds.me);
+      if (code === DisconnectReason.timedOut && !paired) {
+        // "QR refs attempts ended": ninguém leu o QR — para de gerar QR até o usuário pedir outro
+        await this.stopSession(channelId);
+        this.events.onQrExpired(channelId);
+        return;
+      }
+      if (code === DisconnectReason.restartRequired) {
+        // Fluxo normal logo após ler o QR: o WhatsApp pede para reabrir a conexão já pareada.
+        const snapshot = this.auths.get(channelId)?.snapshot();
+        this.sockets.delete(channelId);
+        if (snapshot) this.events.onCredentials(channelId, snapshot);
+        setTimeout(() => {
+          if (!this.stopped) this.connect(channelId, snapshot);
+        }, 500);
         return;
       }
       const attempts = (this.attempts.get(channelId) ?? 0) + 1;

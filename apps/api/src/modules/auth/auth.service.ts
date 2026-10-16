@@ -14,13 +14,19 @@ import { TokenService } from '../../core/token.service';
 export const ARGON2_OPTS = { memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
 const DUMMY_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$Gk3BXv5sqDSy4pTx5pGzUbKgr2WJ8rDZ2HgW6R1mQ2c';
 const MAX_ATTEMPTS = 5;
+/** Janela em que o refresh anterior ainda vale (abas renovando ao mesmo tempo). */
+const REFRESH_GRACE_MS = 30_000;
+const EMAIL_VERIFICATION_TTL_MS = 24 * 3600_000;
 
 export interface IssuedSession {
   accessToken: string;
   expiresIn: number;
-  refreshToken: string;
+  /** null = rotação já feita por outra aba; o cookie atual do navegador continua válido. */
+  refreshToken: string | null;
   sessionId: string;
 }
+
+type LockableUser = { id: string; failedLoginCount: number; lockedUntil: Date | null };
 
 export type LoginResult =
   | ({ kind: 'session' } & IssuedSession)
@@ -44,30 +50,71 @@ export class AuthService {
 
   /* ---------------------------------------------------------------- login */
 
+  private assertNotLocked(user: LockableUser) {
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new DomainError(ErrorCode.ACCOUNT_LOCKED, 'Muitas tentativas. Tente novamente mais tarde.', 429, { until: user.lockedUntil });
+    }
+  }
+
+  /** Bloqueio progressivo: 1, 2, 4, 8... minutos (máx. 60) a partir da 5ª falha (senha ou MFA). */
+  private async registerFailure(user: LockableUser, action: 'login_failed' | 'mfa_failed') {
+    const failed = user.failedLoginCount + 1;
+    const lockedUntil = failed >= MAX_ATTEMPTS ? new Date(Date.now() + Math.min(2 ** (failed - MAX_ATTEMPTS), 60) * 60_000) : null;
+    await this.db.user.update({ where: { id: user.id }, data: { failedLoginCount: failed, lockedUntil } });
+    await this.audit.logSystem({ tenantId: null, actorId: user.id, action, entity: 'user', entityId: user.id, metadata: { failed } });
+  }
+
+  /** Confere a senha com bloqueio e contagem de falhas; zera o contador no acerto. */
+  private async checkPassword(user: LockableUser & { passwordHash: string; status: string }, password: string): Promise<boolean> {
+    this.assertNotLocked(user);
+    const ok = await verify(user.passwordHash, password).catch(() => false);
+    if (!ok || user.status !== 'ACTIVE') {
+      await this.registerFailure(user, 'login_failed');
+      return false;
+    }
+    if (user.failedLoginCount || user.lockedUntil) await this.db.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+    return true;
+  }
+
+  /**
+   * TOTP de uso único: guarda o passo aceito e recusa o mesmo código (ou um anterior)
+   * uma segunda vez. Atualização condicional: duas requisições simultâneas não passam.
+   */
+  private async checkTotp(user: { id: string; mfaSecretEnc: string | null }, code: string): Promise<boolean> {
+    if (!user.mfaSecretEnc) return false;
+    const delta = authenticator.checkDelta(code, this.crypto.decrypt(user.mfaSecretEnc));
+    if (delta === null) return false;
+    const step = Math.floor(Date.now() / 30_000) + delta;
+    const n = await this.db.user.updateMany({
+      where: { id: user.id, OR: [{ mfaLastStep: null }, { mfaLastStep: { lt: step } }] },
+      data: { mfaLastStep: step },
+    });
+    return n.count === 1;
+  }
+
   async login(email: string, password: string): Promise<LoginResult> {
     const user = await this.db.user.findUnique({ where: { email } });
     if (!user) {
       await verify(DUMMY_HASH, password).catch(() => false); // tempo constante contra enumeração
       throw Errors.invalidCredentials();
     }
-    const now = new Date();
-    if (user.lockedUntil && user.lockedUntil > now) {
-      throw new DomainError(ErrorCode.ACCOUNT_LOCKED, 'Muitas tentativas. Tente novamente mais tarde.', 429, { until: user.lockedUntil });
-    }
-    const ok = await verify(user.passwordHash, password).catch(() => false);
-    if (!ok || user.status !== 'ACTIVE') {
-      const failed = user.failedLoginCount + 1;
-      // bloqueio progressivo: 1, 2, 4, 8... minutos (máx. 60) a partir da 5ª falha
-      const lockedUntil = failed >= MAX_ATTEMPTS ? new Date(now.getTime() + Math.min(2 ** (failed - MAX_ATTEMPTS), 60) * 60_000) : null;
-      await this.db.user.update({ where: { id: user.id }, data: { failedLoginCount: failed, lockedUntil } });
-      await this.audit.logSystem({ tenantId: null, actorId: user.id, action: 'login_failed', entity: 'user', entityId: user.id, metadata: { failed } });
-      throw Errors.invalidCredentials();
-    }
-    await this.db.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+    if (!(await this.checkPassword(user, password))) throw Errors.invalidCredentials();
 
     // Senha provisória (cadastro/redefinição pelo dono): troca obrigatória antes de qualquer sessão.
     if (user.mustChangePassword) return { kind: 'password_change_required', mfaToken: await this.tokens.signMfa(user.id, 'password') };
     return this.afterPassword(user);
+  }
+
+  /**
+   * Retomada do cadastro pendente pelo formulário de cadastro: mesmas regras do login
+   * (bloqueio, contagem de falhas). Conta com MFA, senha provisória ou da plataforma
+   * nunca recebe sessão por aqui — precisa passar pelo login completo.
+   */
+  async resumeCheck(userId: string, password: string): Promise<'ok' | 'invalid' | 'login_required'> {
+    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!(await this.checkPassword(user, password))) return 'invalid';
+    if (user.mfaEnabled || user.mustChangePassword || user.platformRole) return 'login_required';
+    return 'ok';
   }
 
   /** Etapas seguintes à senha válida: MFA quando exigida, senão abre a sessão. */
@@ -101,11 +148,13 @@ export class AuthService {
     const { userId, purpose } = await this.tokens.verifyMfa(mfaToken);
     if (purpose !== 'verify') throw Errors.unauthenticated();
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!user.mfaEnabled || !user.mfaSecretEnc) throw Errors.unauthenticated();
-    if (!authenticator.check(code, this.crypto.decrypt(user.mfaSecretEnc))) {
-      await this.audit.logSystem({ tenantId: null, actorId: user.id, action: 'mfa_failed', entity: 'user', entityId: user.id });
-      throw new DomainError(ErrorCode.MFA_INVALID, 'Código inválido', 401);
+    if (!user.mfaEnabled || !user.mfaSecretEnc || user.status !== 'ACTIVE') throw Errors.unauthenticated();
+    this.assertNotLocked(user);
+    if (!(await this.checkTotp(user, code))) {
+      await this.registerFailure(user, 'mfa_failed');
+      throw new DomainError(ErrorCode.MFA_INVALID, 'Código inválido ou já utilizado', 401);
     }
+    if (user.failedLoginCount) await this.db.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
     return this.createSession(user.id, true);
   }
 
@@ -114,14 +163,14 @@ export class AuthService {
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.mfaEnabled) throw Errors.conflict('MFA já habilitada');
     const secret = authenticator.generateSecret();
-    await this.db.user.update({ where: { id: userId }, data: { mfaSecretEnc: this.crypto.encrypt(secret) } });
+    await this.db.user.update({ where: { id: userId }, data: { mfaSecretEnc: this.crypto.encrypt(secret), mfaLastStep: null } });
     return { otpauthUrl: authenticator.keyuri(user.email, 'OrdemCerta', secret), secret };
   }
 
   async mfaEnable(userId: string, code: string): Promise<void> {
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
     if (!user.mfaSecretEnc) throw Errors.precondition('Inicie a configuração de MFA');
-    if (!authenticator.check(code, this.crypto.decrypt(user.mfaSecretEnc))) throw new DomainError(ErrorCode.MFA_INVALID, 'Código inválido', 401);
+    if (!(await this.checkTotp(user, code))) throw new DomainError(ErrorCode.MFA_INVALID, 'Código inválido', 401);
     await this.db.user.update({ where: { id: userId }, data: { mfaEnabled: true } });
     await this.audit.logSystem({ tenantId: null, actorId: userId, action: 'mfa_enabled', entity: 'user', entityId: userId });
   }
@@ -142,16 +191,16 @@ export class AuthService {
   async mfaDisable(userId: string, code: string) {
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.platformRole) throw Errors.forbidden('MFA é obrigatória para a plataforma');
-    if (!user.mfaEnabled || !user.mfaSecretEnc || !authenticator.check(code, this.crypto.decrypt(user.mfaSecretEnc))) {
+    if (!user.mfaEnabled || !(await this.checkTotp(user, code))) {
       throw new DomainError(ErrorCode.MFA_INVALID, 'Código inválido', 401);
     }
-    await this.db.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null } });
+    await this.db.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaLastStep: null } });
     await this.audit.logSystem({ tenantId: null, actorId: userId, action: 'mfa_disabled', entity: 'user', entityId: userId });
   }
 
   /* -------------------------------------------------------------- sessões */
 
-  async createSession(userId: string, mfaVerified: boolean, preferredTenantId?: string): Promise<IssuedSession> {
+  async createSession(userId: string, mfaVerified: boolean, preferredTenantId?: string): Promise<IssuedSession & { refreshToken: string }> {
     const c = maybeCtx();
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
     let tenantId: string | null = null;
@@ -186,14 +235,22 @@ export class AuthService {
     return { accessToken: access.token, expiresIn: access.expiresIn, refreshToken: `${session.id}.${secret}`, sessionId: session.id };
   }
 
-  /** Rotação do refresh token; reuso de token antigo revoga a sessão inteira. */
+  /**
+   * Rotação do refresh token. Reuso de token antigo revoga a sessão inteira, exceto o
+   * refresh imediatamente anterior dentro de REFRESH_GRACE_MS (duas abas renovando juntas):
+   * nesse caso devolve só o access token, sem nova rotação — o cookie do navegador já é o novo.
+   */
   async refresh(refreshToken: string | undefined): Promise<IssuedSession> {
     const [sessionId, secret] = (refreshToken ?? '').split('.');
     if (!sessionId || !secret || !/^[0-9a-f-]{36}$/i.test(sessionId)) throw Errors.unauthenticated();
     const session = await this.db.session.findUnique({ where: { id: sessionId }, include: { user: true } });
-    if (!session || session.revokedAt || session.expiresAt < new Date() || session.user.status !== 'ACTIVE') throw Errors.unauthenticated();
-    if (sha256Hex(secret) !== session.refreshHash) {
-      await this.db.session.update({ where: { id: session.id }, data: { revokedAt: new Date(), revokeReason: 'refresh_reuse' } });
+    const now = new Date();
+    if (!session || session.revokedAt || session.expiresAt < now || session.user.status !== 'ACTIVE') throw Errors.unauthenticated();
+    const presented = sha256Hex(secret);
+    const inGrace = (s: { previousRefreshHash: string | null; rotatedAt: Date | null }) =>
+      s.previousRefreshHash === presented && !!s.rotatedAt && now.getTime() - s.rotatedAt.getTime() < REFRESH_GRACE_MS;
+    if (presented !== session.refreshHash && !inGrace(session)) {
+      await this.db.session.update({ where: { id: session.id }, data: { revokedAt: now, revokeReason: 'refresh_reuse' } });
       await this.audit.logSystem({ tenantId: session.tenantId, actorId: session.userId, action: 'refresh_reuse_detected', entity: 'session', entityId: session.id });
       throw Errors.unauthenticated('Sessão encerrada por segurança');
     }
@@ -202,11 +259,19 @@ export class AuthService {
       const m = await this.db.tenantMembership.findFirst({ where: { tenantId, userId: session.userId, status: 'ACTIVE' } });
       if (!m) tenantId = null;
     }
+    const accessOnly = async (): Promise<IssuedSession> => {
+      const access = await this.tokens.signAccess({ sub: session.userId, sid: session.id, tid: tenantId });
+      return { accessToken: access.token, expiresIn: access.expiresIn, refreshToken: null, sessionId: session.id };
+    };
+    if (presented !== session.refreshHash) return accessOnly();
+
+    // Rotação condicional: se outra aba girou no meio, cai na tolerância em vez de sobrescrever.
     const next = randomToken(32);
-    await this.db.session.update({
-      where: { id: session.id },
-      data: { refreshHash: sha256Hex(next), rotatedAt: new Date(), lastUsedAt: new Date(), tenantId },
+    const rotated = await this.db.session.updateMany({
+      where: { id: session.id, refreshHash: presented, revokedAt: null },
+      data: { refreshHash: sha256Hex(next), previousRefreshHash: presented, rotatedAt: now, lastUsedAt: now, tenantId },
     });
+    if (!rotated.count) return accessOnly();
     const access = await this.tokens.signAccess({ sub: session.userId, sid: session.id, tid: tenantId });
     return { accessToken: access.token, expiresIn: access.expiresIn, refreshToken: `${session.id}.${next}`, sessionId: session.id };
   }
@@ -256,7 +321,7 @@ export class AuthService {
     const a = authCtx();
     const user = await this.db.user.findUniqueOrThrow({
       where: { id: a.userId },
-      select: { id: true, name: true, email: true, platformRole: true, mfaEnabled: true },
+      select: { id: true, name: true, email: true, platformRole: true, mfaEnabled: true, emailVerifiedAt: true },
     });
     const memberships = await this.db.tenantMembership.findMany({
       where: { userId: a.userId, status: 'ACTIVE' },
@@ -296,7 +361,7 @@ export class AuthService {
       };
     }
     return {
-      user: { ...user, mfaVerified: a.mfaVerified },
+      user: { id: user.id, name: user.name, email: user.email, platformRole: user.platformRole, mfaEnabled: user.mfaEnabled, emailVerified: Boolean(user.emailVerifiedAt), mfaVerified: a.mfaVerified },
       tenants: memberships.map((m) => ({ tenantId: m.tenantId, name: m.tenant.name, status: m.tenant.status, role: m.role })),
       current,
     };
@@ -327,10 +392,46 @@ export class AuthService {
     await this.db.$transaction(async (tx) => {
       const used = await tx.passwordResetToken.updateMany({ where: { id: rec.id, usedAt: null }, data: { usedAt: new Date() } });
       if (!used.count) throw Errors.tokenInvalid();
-      await tx.user.update({ where: { id: rec.userId }, data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null } });
+      const user = await tx.user.findUniqueOrThrow({ where: { id: rec.userId }, select: { emailVerifiedAt: true } });
+      await tx.user.update({
+        where: { id: rec.userId },
+        // o link chegou na caixa postal: também prova a posse do e-mail; senha provisória deixa de valer
+        data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null, mustChangePassword: false, emailVerifiedAt: user.emailVerifiedAt ?? new Date() },
+      });
       await tx.session.updateMany({ where: { userId: rec.userId, revokedAt: null }, data: { revokedAt: new Date(), revokeReason: 'password_reset' } });
     });
     await this.audit.logSystem({ tenantId: null, actorId: rec.userId, action: 'password_reset', entity: 'user', entityId: rec.userId });
+  }
+
+  /* ------------------------------------------------- confirmação de e-mail */
+
+  /** Envia o link de confirmação (uso único, 24 h). Links anteriores deixam de valer. */
+  async requestEmailVerification(userId: string) {
+    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.emailVerifiedAt) return { alreadyVerified: true, mailConfigured: this.env.MAIL_TRANSPORT !== 'none' };
+    const recent = await this.db.emailVerificationToken.count({ where: { userId, createdAt: { gt: new Date(Date.now() - 60_000) } } });
+    if (recent) throw new DomainError(ErrorCode.RATE_LIMITED, 'Aguarde 1 minuto para pedir outro e-mail', 429);
+    const token = randomToken(32);
+    const link = `${this.env.APP_URL}/verify-email#token=${token}`;
+    await this.db.$transaction(async (tx) => {
+      await tx.emailVerificationToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });
+      await tx.emailVerificationToken.create({ data: { userId, tokenHash: sha256Hex(token), expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS) } });
+      const content = emailTemplate('email_verification', { name: user.name, link });
+      await tx.emailOutbox.create({ data: { toEmail: user.email, subject: content.subject, template: 'email_verification', payloadJson: { name: user.name, link } } });
+    });
+    await this.audit.logSystem({ tenantId: null, actorId: userId, action: 'email_verification_requested', entity: 'user', entityId: userId });
+    return { alreadyVerified: false, mailConfigured: this.env.MAIL_TRANSPORT !== 'none' };
+  }
+
+  async confirmEmail(token: string) {
+    const rec = await this.db.emailVerificationToken.findUnique({ where: { tokenHash: sha256Hex(token) } });
+    if (!rec || rec.usedAt || rec.expiresAt < new Date()) throw Errors.tokenInvalid();
+    await this.db.$transaction(async (tx) => {
+      const used = await tx.emailVerificationToken.updateMany({ where: { id: rec.id, usedAt: null }, data: { usedAt: new Date() } });
+      if (!used.count) throw Errors.tokenInvalid();
+      await tx.user.update({ where: { id: rec.userId }, data: { emailVerifiedAt: new Date() } });
+    });
+    await this.audit.logSystem({ tenantId: null, actorId: rec.userId, action: 'email_verified', entity: 'user', entityId: rec.userId });
   }
 
   async changePassword(currentPassword: string, newPassword: string) {

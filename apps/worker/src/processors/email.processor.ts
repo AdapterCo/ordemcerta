@@ -3,6 +3,9 @@ import { emailTemplate } from '@ordemcerta/server';
 import type { EmailOutbox } from '@prisma/client';
 import { Deps } from '../deps';
 
+/** Modelos cujo conteúdo é um segredo de uso único (link de senha/confirmação, código OTP). */
+const SECRET_TEMPLATES = new Set(['password_reset', 'email_verification', 'custom']);
+
 /** Envio de e-mails do sistema (recuperação de senha, cobrança). Independe do WhatsApp do tenant. */
 @Injectable()
 export class EmailProcessor implements OnModuleInit, OnModuleDestroy {
@@ -48,12 +51,18 @@ export class EmailProcessor implements OnModuleInit, OnModuleDestroy {
       const payload = (r.payloadJson ?? {}) as Record<string, string>;
       const content = r.template === 'custom' ? { subject: r.subject, text: payload.text ?? '' } : emailTemplate(r.template, payload);
       await this.deps.mailer.send({ to: r.toEmail, subject: content.subject, text: content.text });
-      await db.emailOutbox.update({ where: { id: r.id }, data: { status: 'SENT', sentAt: new Date(), lastError: null } });
+      await db.emailOutbox.update({ where: { id: r.id }, data: { status: 'SENT', sentAt: new Date(), lastError: null, ...this.scrub(r.template) } });
     } catch (e) {
+      const final = r.attempts >= 6;
       await db.emailOutbox.update({
         where: { id: r.id },
-        data: { status: r.attempts >= 6 ? 'FAILED' : 'PENDING', lastError: (e as Error).message.slice(0, 480) },
+        data: { status: final ? 'FAILED' : 'PENDING', lastError: (e as Error).message.slice(0, 480), ...(final ? this.scrub(r.template) : {}) },
       });
     }
+  }
+
+  /** Links de senha/confirmação e códigos OTP não ficam guardados depois do envio. */
+  private scrub(template: string) {
+    return SECRET_TEMPLATES.has(template) ? { payloadJson: { removed: true } } : {};
   }
 }

@@ -19,12 +19,23 @@ echo "[backup] pg_dump (formato custom)"
 docker compose exec -T oc-postgres pg_dump -U postgres -d ordemcerta -Fc --no-owner > "$FILE"
 
 echo "[backup] criptografando (AES256)"
-gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" --symmetric --cipher-algo AES256 -o "$FILE.gpg" "$FILE"
+# senha pelo descritor 3 (não aparece em `ps`, ao contrário de --passphrase)
+gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 -o "$FILE.gpg" "$FILE" 3<<<"$BACKUP_PASSPHRASE"
 sha256sum "$FILE.gpg" | awk '{print $1}' > "$FILE.gpg.sha256"
 
 echo "[backup] gravando em $BACKUP_DIR/db"
 mv "$FILE.gpg" "$BACKUP_DIR/db/ordemcerta-$STAMP.dump.gpg"
 mv "$FILE.gpg.sha256" "$BACKUP_DIR/db/ordemcerta-$STAMP.dump.gpg.sha256"
+
+# Cópia para fora da VPS (opcional): BACKUP_RCLONE_REMOTE="meuremoto:ordemcerta-backups" com rclone configurado.
+if [[ -n "${BACKUP_RCLONE_REMOTE:-}" ]]; then
+  if command -v rclone >/dev/null 2>&1; then
+    echo "[backup] copiando para $BACKUP_RCLONE_REMOTE"
+    rclone copy "$BACKUP_DIR/db" "$BACKUP_RCLONE_REMOTE" --include "ordemcerta-$STAMP.*"
+  else
+    echo "[backup] AVISO: BACKUP_RCLONE_REMOTE definido, mas rclone não está instalado — cópia externa NÃO feita" >&2
+  fi
+fi
 
 echo "[backup] retenção: removendo backups com mais de $RETENTION_DAYS dias"
 find "$BACKUP_DIR/db" -maxdepth 1 -type f -name 'ordemcerta-*.dump.gpg*' -mtime "+$RETENTION_DAYS" -print -delete

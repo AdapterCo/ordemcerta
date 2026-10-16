@@ -34,24 +34,34 @@ function cookie(name: string): string | null {
 
 let refreshing: Promise<boolean> | null = null;
 
+async function doRefresh(): Promise<boolean> {
+  // lido dentro da trava: outra aba pode ter acabado de girar o cookie
+  const csrf = cookie('oc_csrf');
+  if (!csrf) return false;
+  try {
+    const r = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': csrf } });
+    if (!r.ok) {
+      accessToken = null;
+      return false;
+    }
+    const j = (await r.json()) as { accessToken: string };
+    accessToken = j.accessToken;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Uma renovação por vez em TODAS as abas (Web Locks): o refresh é rotativo e duas abas
+ * renovando juntas apresentariam o mesmo token. O servidor ainda tolera o token anterior
+ * por alguns segundos para navegadores sem Web Locks.
+ */
 export function refreshSession(): Promise<boolean> {
   if (!refreshing) {
-    refreshing = (async () => {
-      const csrf = cookie('oc_csrf');
-      if (!csrf) return false;
-      try {
-        const r = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': csrf } });
-        if (!r.ok) {
-          accessToken = null;
-          return false;
-        }
-        const j = (await r.json()) as { accessToken: string };
-        accessToken = j.accessToken;
-        return true;
-      } catch {
-        return false;
-      }
-    })().finally(() => setTimeout(() => (refreshing = null), 0));
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+    const run: Promise<boolean> = locks ? (async () => await locks.request('oc-auth-refresh', doRefresh))() : doRefresh();
+    refreshing = run.finally(() => setTimeout(() => (refreshing = null), 0));
   }
   return refreshing;
 }

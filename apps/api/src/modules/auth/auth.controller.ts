@@ -18,9 +18,10 @@ import { NoTenant, Public } from '../../core/decorators';
 import { ENV, type AppEnv } from '../../core/env.provider';
 import { Doc, ZBody } from '../../core/zod';
 import { AuthService, type IssuedSession } from './auth.service';
-import { assertCsrf, clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from './cookies';
+import { assertCsrf, clearAuthCookies, CSRF_COOKIE, REFRESH_COOKIE, setAuthCookies } from './cookies';
 
 const mfaTokenSchema = z.object({ mfaToken: z.string().min(10).max(2000) });
+const emailTokenSchema = z.object({ token: z.string().min(16).max(200) });
 
 @ApiTags('auth')
 @Controller('auth')
@@ -30,8 +31,11 @@ export class AuthController {
     @Inject(ENV) private readonly env: AppEnv,
   ) {}
 
-  private issue(res: Response, s: IssuedSession) {
-    const csrfToken = setAuthCookies(res, this.env, s.refreshToken);
+  /** Sem refresh novo (tolerância entre abas): mantém os cookies atuais do navegador. */
+  private issue(res: Response, s: IssuedSession, req?: Request) {
+    const csrfToken = s.refreshToken
+      ? setAuthCookies(res, this.env, s.refreshToken)
+      : ((req?.cookies as Record<string, string> | undefined)?.[CSRF_COOKIE] ?? null);
     return { accessToken: s.accessToken, expiresIn: s.expiresIn, csrfToken };
   }
 
@@ -120,7 +124,7 @@ export class AuthController {
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     assertCsrf(req, this.env);
     try {
-      return this.issue(res, await this.auth.refresh((req.cookies as Record<string, string>)?.[REFRESH_COOKIE]));
+      return this.issue(res, await this.auth.refresh((req.cookies as Record<string, string>)?.[REFRESH_COOKIE]), req);
     } catch (e) {
       clearAuthCookies(res, this.env);
       throw e;
@@ -154,6 +158,25 @@ export class AuthController {
   @Doc('Redefine a senha com token de uso único', { body: resetPasswordSchema })
   async reset(@ZBody(resetPasswordSchema) body: z.infer<typeof resetPasswordSchema>) {
     await this.auth.resetPassword(body.token, body.password);
+  }
+
+  @ApiBearerAuth()
+  @NoTenant()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('email/verify-request')
+  @HttpCode(200)
+  @Doc('Envia o link de confirmação do e-mail do usuário autenticado')
+  emailVerifyRequest() {
+    return this.auth.requestEmailVerification(auth().userId);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('email/verify')
+  @HttpCode(204)
+  @Doc('Confirma o e-mail com o token de uso único do link', { body: emailTokenSchema })
+  async emailVerify(@ZBody(emailTokenSchema) body: z.infer<typeof emailTokenSchema>) {
+    await this.auth.confirmEmail(body.token);
   }
 
   @ApiBearerAuth()

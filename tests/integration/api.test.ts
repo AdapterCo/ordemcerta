@@ -192,7 +192,10 @@ describe('cadastro direto de funcionário', () => {
     const l = await new Http(base).req<any>('POST', '/auth/login', { email, password: r.body.temporaryPassword });
     expect(l.body.status).toBe('password_change_required');
 
-    // mesmo e-mail cadastrado em G: só ganha o vínculo, sem trocar a senha
+    // mesmo e-mail cadastrado em G: recusado até a pessoa confirmar o e-mail (conta criada por F)
+    expect((await ownerG.req<any>('POST', '/members', { name: 'Recepção', email, role: 'RECEPTIONIST', branchIds: [G.branchId] })).status).toBe(409);
+    await system.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } });
+    // confirmado: só ganha o vínculo, sem trocar a senha
     const g = await ownerG.req<any>('POST', '/members', { name: 'Recepção', email, role: 'RECEPTIONIST', branchIds: [G.branchId] });
     expect(g.status).toBe(201);
     expect(g.body.existingAccount).toBe(true);

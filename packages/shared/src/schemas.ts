@@ -558,7 +558,11 @@ export const partPurchaseSchema = z
     message: 'Informe o custo para registrar a saída do caixa',
     path: ['unitCostCents'],
   });
-export const cancelPartPurchaseSchema = z.object({ reason: z.string().trim().min(5).max(300) });
+export const cancelPartPurchaseSchema = z.object({
+  reason: z.string().trim().min(5).max(300),
+  /** Paga pelo caixa e o caixa original já fechou: caixa ABERTO (mesma filial) que recebe o dinheiro de volta; vazio = dinheiro não voltou. */
+  refundCashSessionId: uuid.optional().nullable(),
+});
 export const closeCashSchema = z.object({
   declared: z.record(z.enum(PAYMENT_METHODS), cents),
   notes: optionalText(1000),

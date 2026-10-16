@@ -22,7 +22,14 @@ export class MaintenanceProcessor implements OnModuleInit {
     const { db, log } = this.deps;
     const now = new Date();
 
-    const expired = await db.quote.updateMany({ where: { status: 'SENT', expiresAt: { lt: now } }, data: { status: 'EXPIRED' } });
+    // Orçamento vencido sem resposta: registra no histórico da OS para a loja ver e refazer o orçamento
+    const expiring = await db.quote.findMany({ where: { status: 'SENT', expiresAt: { lt: now } }, select: { id: true, tenantId: true, orderId: true, version: true } });
+    const expired = await db.quote.updateMany({ where: { id: { in: expiring.map((q) => q.id) }, status: 'SENT' }, data: { status: 'EXPIRED' } });
+    for (const q of expiring) {
+      await db.serviceOrderEvent.create({
+        data: { tenantId: q.tenantId, orderId: q.orderId, actorId: null, actorType: 'SYSTEM', eventType: 'quote_expired', payloadJson: { quoteId: q.id, version: q.version } },
+      });
+    }
     await db.quoteAccessToken.updateMany({ where: { revokedAt: null, expiresAt: { lt: now } }, data: { revokedAt: now } });
 
     const purged = await db.deviceUnlockSecret.updateMany({ where: { purgedAt: null, expiresAt: { lt: now } }, data: { secretEncrypted: null, purgedAt: now } });
@@ -36,6 +43,25 @@ export class MaintenanceProcessor implements OnModuleInit {
       where: { status: 'DONE', expiresAt: { lt: now } },
       data: { status: 'FAILED', error: 'expirada', content: null, contentType: null },
     });
-    log.info({ quotesExpired: expired.count, unlockSecretsPurged: purged.count, exportsExpired: oldExports.count }, 'manutenção concluída');
+    // Credenciais e tokens vencidos (sem valor de auditoria: os eventos ficam em audit_logs)
+    const day = 86_400_000;
+    const sessions = await db.session.deleteMany({
+      where: { OR: [{ expiresAt: { lt: new Date(now.getTime() - 7 * day) } }, { revokedAt: { lt: new Date(now.getTime() - 30 * day) } }] },
+    });
+    await db.passwordResetToken.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - day) } } });
+    await db.emailVerificationToken.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - day) } } });
+
+    // LGPD (minimização): a imagem da assinatura já foi copiada para o termo, ou o link expirou sem uso
+    const signatures = await db.$executeRaw`
+      UPDATE signature_captures SET content = NULL
+      WHERE content IS NOT NULL AND (consumed_at IS NOT NULL OR expires_at < ${new Date(now.getTime() - day)})`;
+
+    // Webhooks recusados gravados por versões anteriores (hoje não são mais persistidos)
+    await db.billingWebhookEvent.deleteMany({ where: { status: 'IGNORED', receivedAt: { lt: new Date(now.getTime() - 30 * day) } } });
+
+    log.info(
+      { quotesExpired: expired.count, unlockSecretsPurged: purged.count, exportsExpired: oldExports.count, sessionsPurged: sessions.count, signaturesCleared: signatures },
+      'manutenção concluída',
+    );
   }
 }

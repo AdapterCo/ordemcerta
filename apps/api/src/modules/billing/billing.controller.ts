@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle, Throttle } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import { changePlanSchema, checkoutPixSchema, signupSchema } from '@ordemcerta/shared';
 import type { Request, Response } from 'express';
 import type { z } from 'zod';
@@ -165,7 +165,7 @@ export class BillingController {
   }
 
   @Public()
-  @SkipThrottle()
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiExcludeEndpoint()
   @Post('webhooks/mercadopago')
   @HttpCode(200)

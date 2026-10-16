@@ -436,20 +436,39 @@ model User {
   passwordChangedAt DateTime?   @map("password_changed_at") @db.Timestamptz(3)
   /// Senha provisória definida pelo dono/administrador: troca obrigatória no próximo login.
   mustChangePassword Boolean    @default(false) @map("must_change_password")
+  /// Último passo TOTP aceito (impede reuso do mesmo código).
+  mfaLastStep      Int?         @map("mfa_last_step")
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions            Session[]
-  memberships         TenantMembership[]
-  passwordResetTokens PasswordResetToken[]
+  sessions                Session[]
+  memberships             TenantMembership[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
 
   @@map("users")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(128)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
 }
 
 model Session {
   id           String    @id @default(uuid(7)) @db.Uuid
   userId       String    @map("user_id") @db.Uuid
   refreshHash  String    @map("refresh_hash") @db.VarChar(128)
+  /// Hash do refresh anterior: aceito por poucos segundos após a rotação (abas simultâneas).
+  previousRefreshHash String? @map("previous_refresh_hash") @db.VarChar(128)
   tenantId     String?   @map("tenant_id") @db.Uuid
   membershipId String?   @map("membership_id") @db.Uuid
   mfaVerified  Boolean   @default(false) @map("mfa_verified")

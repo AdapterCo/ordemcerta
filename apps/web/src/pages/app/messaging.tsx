@@ -10,19 +10,24 @@ import { formatDateTimeBR, MESSAGING_EVENT_LABELS, MESSAGING_STATUS_LABELS } fro
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-function QrDialog({ channel, open, onClose }: { channel: any; open: boolean; onClose: () => void }) {
+function QrDialog({ channel, open, onClose, onRegenerate, regenerating }: { channel: any; open: boolean; onClose: () => void; onRegenerate: () => void; regenerating: boolean }) {
   const qc = useQueryClient();
   const [qr, setQr] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [lastError, setLastError] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
     let alive = true;
+    setQr(null);
+    setStatus('');
+    setLastError(null);
     const tick = async () => {
       try {
-        const r = await api<{ qr: string | null; status: string }>(`/messaging/channels/${channel.id}/qr`);
+        const r = await api<{ qr: string | null; status: string; lastError?: string | null }>(`/messaging/channels/${channel.id}/qr`);
         if (!alive) return;
         setQr(r.qr);
         setStatus(r.status);
+        setLastError(r.lastError ?? null);
         if (r.status === 'ACTIVE') {
           void qc.invalidateQueries({ queryKey: ['messaging-channels'] });
           void qc.invalidateQueries({ queryKey: ['channel-status', channel.id] });
@@ -46,9 +51,16 @@ function QrDialog({ channel, open, onClose }: { channel: any; open: boolean; onC
       <div className="flex flex-col items-center gap-3 text-sm">
         {qr ? (
           <img src={qr} alt="QR Code de conexão do WhatsApp" width={264} height={264} className="rounded border border-slate-200" />
+        ) : status && status !== 'ONBOARDING' && status !== 'ACTIVE' ? (
+          <div className="flex h-[264px] w-[264px] flex-col items-center justify-center gap-3 rounded border border-dashed border-slate-300 p-4 text-center text-slate-600">
+            <span>{lastError ?? 'A conexão não foi concluída.'}</span>
+            <Button size="sm" loading={regenerating} onClick={onRegenerate}>
+              Gerar novo QR
+            </Button>
+          </div>
         ) : (
-          <div className="flex h-[264px] w-[264px] items-center justify-center rounded border border-dashed border-slate-300 text-slate-500">
-            Aguardando o servidor emitir o QR…
+          <div className="flex h-[264px] w-[264px] items-center justify-center rounded border border-dashed border-slate-300 p-4 text-center text-slate-500">
+            Aguardando o servidor emitir o QR… (pode levar até 20 segundos)
           </div>
         )}
         <ol className="list-decimal space-y-1 pl-5 text-left text-slate-600">
@@ -178,7 +190,7 @@ function ChannelCard({ channel }: { channel: any }) {
           )}
         </div>
       )}
-      <QrDialog channel={channel} open={qrOpen} onClose={() => setQrOpen(false)} />
+      <QrDialog channel={channel} open={qrOpen} onClose={() => setQrOpen(false)} onRegenerate={() => start.mutate()} regenerating={start.isPending} />
       <Dialog open={Boolean(onboarding)} onOpenChange={() => setOnboarding(null)} title="Conexão oficial (BYOK)" wide footer={<Button loading={complete.isPending} disabled={!form.wabaId || !form.phoneNumberId || !form.accessToken} onClick={() => complete.mutate()}>Conectar</Button>}>
         {onboarding?.mode === 'embedded_signup' ? (
           <Alert tone="blue">Embedded Signup habilitado (config {onboarding.configId}). Conclua o fluxo da Meta e informe os IDs retornados abaixo.</Alert>
@@ -229,7 +241,15 @@ function TemplatesCard() {
       );
     }
   }, [q.data]);
-  const save = useAction((_: void) => api('/messaging/templates', { method: 'PUT', body: { templates: rows.filter((r) => r.name && r.body) } }), { success: 'Templates salvos', invalidate: [['templates']] });
+  // Canal por QR não usa o nome do template na Meta: gera um nome interno quando vazio.
+  const save = useAction(
+    (_: void) =>
+      api('/messaging/templates', {
+        method: 'PUT',
+        body: { templates: rows.filter((r) => r.body.trim()).map((r) => ({ ...r, name: r.name.trim() || `oc_${String(r.eventType).toLowerCase().replace(/[^a-z0-9]+/g, '_')}` })) },
+      }),
+    { success: 'Templates salvos', invalidate: [['templates']] },
+  );
   return (
     <Card title="Templates das mensagens" actions={can('messaging:manage') && <Button size="sm" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>}>
       <p className="mb-2 text-xs text-slate-500">

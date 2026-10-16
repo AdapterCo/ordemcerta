@@ -64,11 +64,26 @@ integração/E2E são executados na VPS (PostgreSQL 17 + Redis 7).
 
 - Integrações Mercado Pago, Meta/WhatsApp e SMTP implementadas, porém **não homologadas** — sem credenciais retornam "integração não configurada".
 - Cobrança avulsa por cartão da diferença de upgrade não implementada (exige checkout/tokenização); a diferença é paga via Pix mesmo para assinaturas de cartão.
-- Adaptador WhatsApp por QR Code (não oficial) não habilitado (falha explicitamente).
+- WhatsApp por QR Code (Baileys, **não oficial**) disponível como segunda opção: sessão no worker, QR via Redis, mensagens com o texto local dos templates (sem aprovação da Meta). Sujeito a desconexão/restrição pela Meta; use número dedicado. Exige saída para a internet no worker (rede `egress` do compose).
 - Embedded Signup da Meta depende de habilitação do app; fluxo assistido disponível.
-- Confirmação de e-mail no cadastro não implementada (opcional na especificação).
+- Confirmação de e-mail: enviada no cadastro e disponível em "Meu perfil"; obrigatória para vincular a outra empresa uma conta criada por terceiros (o envio depende de SMTP configurado).
 - Documento fiscal fora do escopo (comprovantes marcados como NÃO FISCAL).
 - Termos/políticas são modelos e exigem revisão jurídica.
+
+## Varredura de segurança (2026-10-15)
+
+Corrigido: OTP do portal com contador efetivo (tentativa gravada fora da transação da decisão); vínculo de conta
+existente a outra empresa só com e-mail confirmado (pré-sequestro de conta); refresh rotativo atômico com tolerância
+de 30 s + Web Locks no navegador (várias abas); webhook Mercado Pago com assinatura inválida não é persistido e tem
+limite de taxa; retomada de cadastro respeita bloqueio/MFA/senha provisória; TOTP de uso único e com bloqueio
+progressivo; websocket revalidado a cada minuto; suspensão bloqueia notas/checklist/QR de assinatura/cancelamento de
+peça; limpeza de sessões, tokens, imagens de assinatura usadas e links/códigos do outbox de e-mail; CSP sem `https:`
+genérico; senha do gpg fora da linha de comando + cópia externa opcional (rclone); CI dispara em `master`;
+dependências: nodemailer 10, vitest 4, music-metadata ≥ 11.16 (override). Testes de regressão em
+`tests/integration/security.test.ts`.
+
+Riscos aceitos (dependências): `deepmerge-ts` (só lê a config do próprio Prisma), `js-yaml` (só gera o OpenAPI),
+`uuid` (falha só ao passar buffer, não usado), `esbuild` (servidor de desenvolvimento no Windows).
 
 ## Decisão: sem armazenamento de objetos (2026-10-09)
 

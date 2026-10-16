@@ -114,6 +114,7 @@ export const ORDER_EVENT_LABELS: Record<string, string> = {
   quote_sent_awaiting_approval: 'Aguardando aprovação do orçamento',
   quote_approved: 'Orçamento aprovado',
   quote_rejected: 'Orçamento recusado',
+  quote_expired: 'Orçamento venceu sem resposta do cliente — crie uma nova versão',
   parts_requested: 'Aguardando peças',
   parts_arrived: 'Peças chegaram',
   part_reserved: 'Peça reservada do estoque',

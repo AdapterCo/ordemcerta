@@ -88,6 +88,14 @@ export class MembersService {
       if (!user) user = await tx.user.create({ data: { email: input.email, name: input.name, passwordHash, mustChangePassword: true } });
       const existing = await tx.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } } });
       if (existing?.status === 'ACTIVE') throw Errors.conflict('Este e-mail já participa da empresa');
+      // Conta criada por outra empresa (senha conhecida por ela) só entra aqui depois que o dono do
+      // e-mail provar a posse da caixa postal; senão uma empresa poderia "pré-cadastrar" um e-mail
+      // e herdar o acesso quando outra loja vinculasse a mesma pessoa.
+      if (!created && !existing && !user.emailVerifiedAt) {
+        throw Errors.conflict(
+          'Este e-mail já tem conta no OrdemCerta, mas ainda não foi confirmado. Peça para a pessoa entrar e confirmar o e-mail em "Meu perfil" (ou usar "Esqueci a senha") e cadastre de novo.',
+        );
+      }
       const membership = existing
         ? await tx.tenantMembership.update({ where: { id: existing.id }, data: { role: input.role, status: 'ACTIVE' } })
         : await tx.tenantMembership.create({ data: { tenantId, userId: user.id, role: input.role } });

@@ -84,7 +84,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-    networks: [internal]
+    # internal: banco/Redis. egress: saída para a internet (WhatsApp/Baileys, API da Meta,
+    # Mercado Pago, SMTP) — a rede internal não tem rota externa.
+    networks: [internal, egress]
 
   oc-web:
     build: { context: ., dockerfile: infra/docker/web.Dockerfile }
@@ -100,3 +102,4 @@ networks:
   internal:
     internal: true
   edge: {}
+  egress: {}

@@ -34,6 +34,10 @@ export class MessagingProcessor implements OnModuleInit {
       await this.deps.sessions.startSession((job.data as SessionJob).channelId);
       return;
     }
+    if (job.name === 'session-restart') {
+      await this.deps.sessions.restartSession((job.data as SessionJob).channelId, (job.data as { fresh?: boolean }).fresh === true);
+      return;
+    }
     if (job.name === 'session-stop') {
       const d = job.data as SessionJob;
       await this.deps.sessions.stopSession(d.channelId, (job.data as { logout?: boolean }).logout === true);

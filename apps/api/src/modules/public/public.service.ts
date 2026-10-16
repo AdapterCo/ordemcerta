@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { isPng, MAX_SIGNATURE_BYTES, randomNumericCode, sha256Hex, emailTemplate, renderPlaceholders } from '@ordemcerta/server';
+import { isPng, MAX_SIGNATURE_BYTES, randomNumericCode, safeEqual, sha256Hex, emailTemplate, renderPlaceholders } from '@ordemcerta/server';
 import {
   DELIVERY_STATUS_LABELS,
   ErrorCode,
@@ -176,18 +176,27 @@ export class PublicService {
     });
   }
 
-  private async verifyOtp(tx: Parameters<Parameters<TenantDb['runFor']>[1]>[0], tenantId: string, orderId: string, quoteId: string, code?: string) {
+  /**
+   * Confere o OTP numa transação PRÓPRIA: a tentativa errada é gravada (commit) antes do
+   * erro, senão o rollback da decisão desfaria o contador e o limite de 5 tentativas não valeria.
+   * Devolve o id do código conferido; o consumo acontece na transação da decisão.
+   */
+  private async checkOtp(tenantId: string, orderId: string, quoteId: string, code?: string): Promise<string> {
     if (!code) throw new DomainError(ErrorCode.OTP_REQUIRED, 'Informe o código enviado por e-mail', 422);
-    const otp = await tx.publicOtp.findFirst({
-      where: { tenantId, orderId, purpose: 'QUOTE_DECISION', targetId: quoteId, consumedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
+    const otpId = await this.db.runFor(tenantId, async (tx) => {
+      const otp = await tx.publicOtp.findFirst({
+        where: { tenantId, orderId, purpose: 'QUOTE_DECISION', targetId: quoteId, consumedAt: null, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!otp || otp.attempts >= 5) return null;
+      if (!safeEqual(otp.codeHash, sha256Hex(`${quoteId}:${code}`))) {
+        await tx.publicOtp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
+        return null;
+      }
+      return otp.id;
     });
-    if (!otp || otp.attempts >= 5) throw new DomainError(ErrorCode.OTP_INVALID, 'Código inválido ou expirado', 422);
-    if (otp.codeHash !== sha256Hex(`${quoteId}:${code}`)) {
-      await tx.publicOtp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
-      throw new DomainError(ErrorCode.OTP_INVALID, 'Código inválido ou expirado', 422);
-    }
-    await tx.publicOtp.update({ where: { id: otp.id }, data: { consumedAt: new Date() } });
+    if (!otpId) throw new DomainError(ErrorCode.OTP_INVALID, 'Código inválido ou expirado', 422);
+    return otpId;
   }
 
   /** Aprovação/recusa pelo cliente, vinculada à versão exata e com evidências minimizadas. */
@@ -198,12 +207,20 @@ export class PublicService {
       throw new DomainError(ErrorCode.SUBSCRIPTION_INACTIVE, 'No momento a assistência não pode receber aprovações online. Entre em contato com a loja.', 409);
     }
     const c = maybeCtx();
+    const requireOtp = await this.db.runFor(r.tenantId, async (tx) => {
+      const o = await tx.serviceOrder.findFirstOrThrow({ where: { id: r.orderId, tenantId: r.tenantId }, select: { branchId: true } });
+      return Boolean(await this.settings.get(tx, r.tenantId, 'portal.require_otp_for_quote', o.branchId));
+    });
+    const otpId = requireOtp ? await this.checkOtp(r.tenantId, r.orderId, quoteId, input.otpCode) : null;
     return this.db.runFor(r.tenantId, async (tx, hooks) => {
       const q = await tx.quote.findFirst({ where: { id: quoteId, tenantId: r.tenantId, orderId: r.orderId } });
       if (!q) throw this.notFound();
       const o = await tx.serviceOrder.findFirstOrThrow({ where: { id: r.orderId, tenantId: r.tenantId } });
-      const requireOtp = await this.settings.get(tx, r.tenantId, 'portal.require_otp_for_quote', o.branchId);
-      if (requireOtp) await this.verifyOtp(tx, r.tenantId, o.id, q.id, input.otpCode);
+      if (otpId) {
+        // uso único mesmo com duas decisões simultâneas
+        const used = await tx.publicOtp.updateMany({ where: { id: otpId, consumedAt: null }, data: { consumedAt: new Date() } });
+        if (!used.count) throw new DomainError(ErrorCode.OTP_INVALID, 'Código inválido ou expirado', 422);
+      }
       const tpl = await documentTemplate(tx, r.tenantId, 'APPROVAL');
       const expected = this.acceptText(o.number, q.version, q.totalCents, tpl.content);
       if (decision === 'approve' && input.acceptText !== expected) throw Errors.validation('Texto de aceite não corresponde à versão atual do orçamento');

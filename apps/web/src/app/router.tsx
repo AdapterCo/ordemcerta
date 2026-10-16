@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout, PlatformLayout, RequireAuth, RequirePerm, RequirePlatform, RequireTenant } from '@/components/layout';
+import { RouteError } from '@/components/route-error';
 import { Spinner } from '@/components/ui';
 import type { Permission } from '@ordemcerta/shared';
 
@@ -30,14 +31,20 @@ const messaging = () => import('@/pages/app/messaging');
 const settings = () => import('@/pages/app/settings');
 const billing = () => import('@/pages/app/billing');
 const platform = () => import('@/pages/platform/platform');
+const profile = () => import('@/pages/app/profile');
 
 const guard = (perm: Permission, el: ReactNode) => <RequirePerm perm={perm}>{el}</RequirePerm>;
 
 export const router = createBrowserRouter([
+  {
+    // rota-pai sem caminho: tela de erro única (em português) para qualquer página
+    errorElement: <RouteError />,
+    children: [
   { path: '/', element: <Navigate to="/app/dashboard" replace /> },
   { path: '/login', element: load(auth, 'LoginPage') },
   { path: '/forgot-password', element: load(auth, 'ForgotPasswordPage') },
   { path: '/reset-password', element: load(auth, 'ResetPasswordPage') },
+  { path: '/verify-email', element: load(auth, 'VerifyEmailPage') },
   { path: '/pricing', element: load(commercial, 'PricingPage') },
   { path: '/planos', element: load(commercial, 'PricingPage') },
   { path: '/signup', element: load(commercial, 'SignupPage') },
@@ -89,6 +96,7 @@ export const router = createBrowserRouter([
       { path: 'billing', element: guard('billing:view', load(billing, 'BillingPage')) },
       { path: 'billing/planos', element: guard('billing:view', load(billing, 'BillingPlansPage')) },
       { path: 'billing/faturas/:id', element: guard('billing:view', load(billing, 'InvoicePage')) },
+      { path: 'profile', element: load(profile, 'ProfilePage') },
     ],
   },
   {
@@ -116,4 +124,6 @@ export const router = createBrowserRouter([
     ],
   },
   { path: '*', element: <Navigate to="/app/dashboard" replace /> },
+    ],
+  },
 ]);

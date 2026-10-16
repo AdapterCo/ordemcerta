@@ -231,6 +231,7 @@ export class ServiceOrdersController {
 
   @Post(':id/notes')
   @Perm('os:view')
+  @Operational()
   @Doc('Adiciona nota (interna ou visível ao cliente)', { body: noteSchema })
   note(@Param('id', ParseUUIDPipe) id: string, @ZBody(noteSchema) body: z.infer<typeof noteSchema>) {
     return this.orders.addNote(id, body);
@@ -238,6 +239,7 @@ export class ServiceOrdersController {
 
   @Post(':id/signature-captures')
   @Perm('os:view')
+  @Operational()
   @Doc('Gera QR code/link de uso único (15 min) para o cliente assinar no próprio celular', { body: signatureCaptureCreateSchema })
   createSignatureCapture(@Param('id', ParseUUIDPipe) id: string, @ZBody(signatureCaptureCreateSchema) body: z.infer<typeof signatureCaptureCreateSchema>) {
     return this.signatures.createCapture(id, body.purpose);
@@ -261,6 +263,7 @@ export class ServiceOrdersController {
 
   @Post(':id/part-purchases/:purchaseId/cancel')
   @Perm('os:repair')
+  @Operational()
   @HttpCode(200)
   @Doc('Cancela compra de peça (estorna custo e, se pago pelo caixa, devolve ao caixa aberto)', { body: cancelPartPurchaseSchema })
   cancelPartPurchase(
@@ -273,6 +276,7 @@ export class ServiceOrdersController {
 
   @Post(':id/checklists')
   @Perm('os:diagnose')
+  @Operational()
   @Doc('Registra checklist (entrada/pós-reparo)', { body: checklistSchema })
   checklist(@Param('id', ParseUUIDPipe) id: string, @ZBody(checklistSchema) body: z.infer<typeof checklistSchema>) {
     return this.orders.addChecklist(id, body);

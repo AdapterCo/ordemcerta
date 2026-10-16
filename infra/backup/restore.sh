@@ -14,7 +14,7 @@ trap 'rm -rf "$WORK"' EXIT
 cp "$BACKUP_DIR/db/$NAME" "$WORK/b.gpg"
 cp "$BACKUP_DIR/db/$NAME.sha256" "$WORK/b.sha256"
 [[ "$(sha256sum "$WORK/b.gpg" | awk '{print $1}')" == "$(cat "$WORK/b.sha256")" ]] || { echo "checksum inválido"; exit 2; }
-gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" -o "$WORK/b.dump" -d "$WORK/b.gpg"
+gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 -o "$WORK/b.dump" -d "$WORK/b.gpg" 3<<<"$BACKUP_PASSPHRASE"
 
 docker compose exec -T oc-postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$TARGET_DB' AND pid <> pg_backend_pid();" >/dev/null
 docker compose exec -T oc-postgres dropdb -U postgres --if-exists "$TARGET_DB"

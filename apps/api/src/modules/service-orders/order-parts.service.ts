@@ -95,20 +95,30 @@ export class OrderPartsService {
       assertBranch(p.branchId);
       if (p.canceledAt) throw Errors.conflict('Esta compra já foi cancelada');
 
+      let cashRefund: 'original' | 'other' | 'not_returned' | null = null;
       if (p.cashMovementId) {
         assertCan('cash:operate');
         const mv = await tx.cashMovement.findFirstOrThrow({ where: { id: p.cashMovementId, tenantId }, select: { cashSessionId: true } });
         const s = await tx.cashSession.findFirstOrThrow({ where: { id: mv.cashSessionId, tenantId }, select: { status: true } });
-        if (s.status !== 'OPEN') {
-          throw Errors.precondition('O caixa em que a peça foi paga já foi fechado. Se o dinheiro voltou, registre um suprimento no caixa atual e cancele novamente após conferir.');
+        // Caixa original aberto: devolve nele. Fechado: devolve no caixa aberto escolhido ou registra que o dinheiro não voltou.
+        let target: string | null = s.status === 'OPEN' ? mv.cashSessionId : null;
+        if (!target && input.refundCashSessionId) {
+          const other = await tx.cashSession.findFirst({ where: { id: input.refundCashSessionId, tenantId }, select: { status: true, branchId: true } });
+          if (!other || other.status !== 'OPEN' || other.branchId !== p.branchId) throw Errors.validation('Escolha um caixa aberto da mesma filial da OS');
+          target = input.refundCashSessionId;
         }
-        await this.cash.movementIn(
-          tx,
-          mv.cashSessionId,
-          'SUPPLY',
-          { amountCents: p.totalCostCents, reason: `Estorno de compra de peça: ${p.description}`.slice(0, 300) },
-          `part-cancel:${p.id}`,
-        );
+        if (target) {
+          await this.cash.movementIn(
+            tx,
+            target,
+            'SUPPLY',
+            { amountCents: p.totalCostCents, reason: `Estorno de compra de peça: ${p.description}`.slice(0, 300) },
+            `part-cancel:${p.id}`,
+          );
+          cashRefund = target === mv.cashSessionId ? 'original' : 'other';
+        } else {
+          cashRefund = 'not_returned';
+        }
       }
 
       const canceled = await tx.orderPartPurchase.update({
@@ -121,9 +131,9 @@ export class OrderPartsService {
         ]);
       }
       await tx.serviceOrderEvent.create({
-        data: { tenantId, orderId: p.orderId, actorId, eventType: 'part_purchase_canceled', payloadJson: { purchaseId: p.id, reason: input.reason } },
+        data: { tenantId, orderId: p.orderId, actorId, eventType: 'part_purchase_canceled', payloadJson: { purchaseId: p.id, reason: input.reason, cashRefund } },
       });
-      await this.audit.log(tx, { action: 'part_purchase_canceled', entity: 'order_part_purchase', entityId: p.id, metadata: { reason: input.reason } });
+      await this.audit.log(tx, { action: 'part_purchase_canceled', entity: 'order_part_purchase', entityId: p.id, metadata: { reason: input.reason, cashRefund } });
       return canceled;
     });
   }

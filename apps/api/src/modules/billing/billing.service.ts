@@ -1,5 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { verify } from '@node-rs/argon2';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BillingEngine, buildSubscriptionReceiptPdf, MercadoPagoGateway, sha256Hex, isUniqueViolation } from '@ordemcerta/server';
 import { type SignupInput } from '@ordemcerta/shared';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +30,7 @@ export class BillingEngineProvider extends BillingEngine {
  */
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger('Billing');
   constructor(
     private readonly system: SystemPrisma,
     private readonly engine: BillingEngineProvider,
@@ -60,8 +60,10 @@ export class BillingService {
 
     const existing = await this.system.user.findUnique({ where: { email: input.email } });
     if (existing) {
-      const ok = await verify(existing.passwordHash, input.password).catch(() => false);
-      if (!ok) throw generic();
+      // mesmas regras do login: bloqueio progressivo, contagem de falhas, MFA e senha provisória
+      const check = await this.authService.resumeCheck(existing.id, input.password);
+      if (check === 'invalid') throw generic();
+      if (check === 'login_required') throw Errors.conflict('Você já tem cadastro. Entre com seu e-mail e senha para concluir a contratação.');
       const pending = await this.system.tenantMembership.findFirst({
         where: { userId: existing.id, role: 'TENANT_OWNER', tenant: { status: 'PENDING_PAYMENT' } },
         include: { tenant: { include: { subscription: true } } },
@@ -102,6 +104,8 @@ export class BillingService {
       throw e;
     }
     const session = await this.authService.createSession(created.userId, false, created.tenantId);
+    // confirmação de e-mail do responsável (não bloqueia a contratação)
+    await this.authService.requestEmailVerification(created.userId).catch(() => undefined);
     return { resumed: false, tenantId: created.tenantId, session, paymentMode: input.paymentMode };
   }
 
@@ -260,6 +264,12 @@ export class BillingService {
     const type = String(body.type ?? input.query.type ?? input.query.topic ?? 'unknown');
     if (!dataId) return { accepted: false };
     const sig = this.engine.gateway.validateWebhook({ xSignature: input.xSignature, xRequestId: input.xRequestId, dataId });
+    if (!sig.valid) {
+      // Não persiste: um evento forjado ocuparia as chaves únicas (event_id / recurso+hash) e o
+      // evento verdadeiro seria descartado como "duplicado"; também evita encher o banco.
+      this.logger.warn({ reason: sig.reason, type: type.slice(0, 60) }, 'webhook Mercado Pago com assinatura inválida descartado');
+      throw Errors.forbidden('Assinatura inválida');
+    }
     const eventId = body.id !== undefined ? String(body.id) : null;
     const payloadHash = sha256Hex(input.raw ?? Buffer.from(JSON.stringify(body)));
     let event;
@@ -273,16 +283,15 @@ export class BillingService {
           eventType: typeof body.action === 'string' ? body.action.slice(0, 80) : null,
           payloadHash,
           payloadMinJson: { type, action: body.action ?? null, dataId, liveMode: body.live_mode ?? null },
-          signatureValid: sig.valid,
-          status: sig.valid ? 'RECEIVED' : 'IGNORED',
-          error: sig.valid ? null : `assinatura inválida (${sig.reason})`,
+          signatureValid: true,
+          status: 'RECEIVED',
+          error: null,
         },
       });
     } catch (e) {
       if (isUniqueViolation(e)) return { accepted: true, duplicate: true };
       throw e;
     }
-    if (!sig.valid) throw Errors.forbidden('Assinatura inválida');
     await this.queues.add('billing', 'webhook', { kind: 'webhook', eventId: event.id }, { jobId: `webhook:${event.id}` });
     return { accepted: true };
   }

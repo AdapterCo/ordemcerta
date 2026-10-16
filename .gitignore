@@ -10,3 +10,6 @@ storage-local/
 playwright-report/
 test-results/
 .DS_Store
+
+# artefatos de build incremental do TypeScript
+*.tsbuildinfo
