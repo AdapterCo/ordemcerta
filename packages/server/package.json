@@ -14,7 +14,7 @@
     "@ordemcerta/shared": "workspace:*",
     "@prisma/client": "^6.16.0",
     "@socket.io/redis-emitter": "^5.1.0",
-    "baileys": "6.17.16",
+    "baileys": "7.0.0-rc14",
     "bullmq": "^5.56.0",
     "ioredis": "^5.6.1",
     "mercadopago": "^2.8.0",

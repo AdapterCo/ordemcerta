@@ -5,6 +5,7 @@ import {
   DisconnectReason,
   fetchLatestBaileysVersion,
   initAuthCreds,
+  proto,
   type AuthenticationState,
   type ConnectionState,
   type SignalDataSet,
@@ -113,7 +114,11 @@ export class BaileysSessionManager {
         const out: { [id: string]: SignalDataTypeMap[typeof type] } = {};
         for (const id of ids) {
           const raw = shadow.get(`${String(type)}^${id}`);
-          if (raw !== undefined) out[id] = JSON.parse(raw, BufferJSON.reviver) as SignalDataTypeMap[typeof type];
+          if (raw === undefined) continue;
+          let value = JSON.parse(raw, BufferJSON.reviver);
+          // como no useMultiFileAuthState oficial: chave de sincronização volta a ser objeto protobuf
+          if (type === 'app-state-sync-key' && value) value = proto.Message.AppStateSyncKeyData.fromObject(value);
+          out[id] = value as SignalDataTypeMap[typeof type];
         }
         return out;
       },
@@ -227,7 +232,9 @@ export class BaileysSessionManager {
       return;
     }
     if (u.connection === 'close') {
-      const code = (u.lastDisconnect?.error as unknown as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
+      const err = u.lastDisconnect?.error as unknown as { output?: { statusCode?: number }; message?: string } | undefined;
+      const code = err?.output?.statusCode;
+      const reason = err?.message?.slice(0, 200);
       if (code === DisconnectReason.loggedOut) {
         await this.stopSession(channelId);
         this.events.onLoggedOut(channelId);
@@ -259,7 +266,7 @@ export class BaileysSessionManager {
       const snapshot = this.auths.get(channelId)?.snapshot();
       this.sockets.delete(channelId); // socket morto: libera a vaga para o reconnect
       const delay = Math.min(RECONNECT_BASE_MS * attempts, RECONNECT_CAP_MS);
-      this.log.warn({ channelId, code, attempts, delay }, 'baileys: conexão fechada; agendando reconexão');
+      this.log.warn({ channelId, code, reason, paired: Boolean(this.auths.get(channelId)?.state.creds.me), attempts, delay }, 'baileys: conexão fechada; agendando reconexão');
       setTimeout(() => {
         if (!this.stopped) this.connect(channelId, snapshot);
       }, delay);
