@@ -375,7 +375,7 @@ export class ServiceOrdersService {
       const token = randomToken(24);
       const ttlDays = await this.settings.get(tx, tenantId, 'portal.token_ttl_days');
       await tx.publicTrackingToken.create({
-        data: { tenantId, orderId: order.id, tokenHash: sha256Hex(token), expiresAt: new Date(now.getTime() + ttlDays * 86_400_000), createdBy: a.userId },
+        data: { tenantId, orderId: order.id, tokenHash: sha256Hex(token), tokenEnc: this.crypto.encrypt(token), expiresAt: new Date(now.getTime() + ttlDays * 86_400_000), createdBy: a.userId },
       });
       await tx.serviceOrderEvent.create({
         data: { tenantId, orderId: order.id, actorId: a.userId, eventType: 'created', toStatus: order.technicalStatus, payloadJson: { priority: order.priority, category: order.category } },
@@ -423,7 +423,7 @@ export class ServiceOrdersService {
     const token = randomToken(24);
     const ttlDays = await this.settings.get(tx, original.tenantId, 'portal.token_ttl_days');
     await tx.publicTrackingToken.create({
-      data: { tenantId: original.tenantId, orderId: order.id, tokenHash: sha256Hex(token), expiresAt: new Date(now.getTime() + ttlDays * 86_400_000), createdBy: a.userId },
+      data: { tenantId: original.tenantId, orderId: order.id, tokenHash: sha256Hex(token), tokenEnc: this.crypto.encrypt(token), expiresAt: new Date(now.getTime() + ttlDays * 86_400_000), createdBy: a.userId },
     });
     await tx.serviceOrderEvent.create({
       data: { tenantId: original.tenantId, orderId: order.id, actorId: a.userId, eventType: 'created_warranty_return', toStatus: 'RECEIVED', payloadJson: { originalOrderId: original.id } },
@@ -516,7 +516,7 @@ export class ServiceOrdersService {
       const token = randomToken(24);
       const ttlDays = await this.settings.get(tx, o.tenantId, 'portal.token_ttl_days');
       await tx.publicTrackingToken.create({
-        data: { tenantId: o.tenantId, orderId: id, tokenHash: sha256Hex(token), expiresAt: new Date(Date.now() + ttlDays * 86_400_000), createdBy: auth().userId },
+        data: { tenantId: o.tenantId, orderId: id, tokenHash: sha256Hex(token), tokenEnc: this.crypto.encrypt(token), expiresAt: new Date(Date.now() + ttlDays * 86_400_000), createdBy: auth().userId },
       });
       await this.audit.log(tx, { action: 'os_tracking_token_reissued', entity: 'service_order', entityId: id });
       return { trackingToken: token, trackingUrl: trackingLink(this.env.APP_URL, o.number, token) };

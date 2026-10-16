@@ -1370,6 +1370,8 @@ model PublicTrackingToken {
   tenantId    String    @map("tenant_id") @db.Uuid
   orderId     String    @map("order_id") @db.Uuid
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
+  /// Token criptografado (chave da aplicação) para montar o link nas notificações; nunca exibido.
+  tokenEnc    String?   @map("token_enc")
   expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
   revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
   createdBy   String?   @map("created_by") @db.Uuid

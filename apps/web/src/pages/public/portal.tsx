@@ -324,7 +324,9 @@ export function StatusPage() {
 /** /quote#token=… ou /quote/:token — link de uso limitado para decidir o orçamento. */
 export function QuotePage() {
   const params = useParams();
-  const token = params.token ?? fragmentParam('token') ?? '';
+  // lido UMA vez: o #token é apagado da barra de endereço depois de carregar (não fica exposto);
+  // ler a cada render deixava o token vazio → "Link inválido" e aprovação sem token
+  const [token] = useState(() => params.token ?? fragmentParam('token') ?? '');
   const [view, setView] = useState<PortalView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const started = useRef(false);
@@ -370,7 +372,7 @@ interface SignView {
 
 /** Assinatura no celular do cliente (aberta pelo QR code da loja; token no fragmento #). */
 export function SignPage() {
-  const token = fragmentParam('token');
+  const [token] = useState(() => fragmentParam('token'));
   const [view, setView] = useState<SignView | null>(null);
   const [error, setError] = useState<string | null>(token ? null : 'Link inválido. Peça à loja um novo QR code.');
   const [name, setName] = useState('');

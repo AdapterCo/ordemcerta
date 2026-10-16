@@ -1,5 +1,5 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { MessagingError, renderPlaceholders, templateBodyParams, type ChannelCredentials } from '@ordemcerta/server';
+import { MessagingError, renderPlaceholders, sha256Hex, templateBodyParams, type ChannelCredentials } from '@ordemcerta/server';
 import { UnrecoverableError, type Job } from 'bullmq';
 import { Deps, isLastAttempt } from '../deps';
 import { messageVariables } from '../messaging-render';
@@ -44,6 +44,47 @@ export class MessagingProcessor implements OnModuleInit {
       return;
     }
     await this.send(job as unknown as Job<SendJob>);
+  }
+
+  /**
+   * Token vigente de acompanhamento da OS: o do próprio evento, o guardado criptografado no
+   * token ativo ou (OS criadas antes dessa coluna) o do evento de abertura no outbox — sempre
+   * conferido pelo hash contra um token ativo (reemitido/revogado não vale).
+   */
+  private async trackingToken(tenantId: string, orderId: string, eventTokenEnc?: string): Promise<string | null> {
+    const { db, crypto } = this.deps;
+    const now = new Date();
+    const active = await db.publicTrackingToken.findMany({
+      where: { tenantId, orderId, revokedAt: null, expiresAt: { gt: now } },
+      select: { tokenHash: true, tokenEnc: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!active.length) return null;
+    const isActive = (t: string) => active.some((a) => a.tokenHash === sha256Hex(t));
+    const tryDecrypt = (enc?: string | null) => {
+      try {
+        return enc ? crypto.decrypt(enc) : null;
+      } catch {
+        return null;
+      }
+    };
+    const fromEvent = tryDecrypt(eventTokenEnc);
+    if (fromEvent && isActive(fromEvent)) return fromEvent;
+    for (const a of active) {
+      const t = tryDecrypt(a.tokenEnc);
+      if (t) return t;
+    }
+    const opened = await db.notificationOutbox.findMany({
+      where: { tenantId, aggregateId: orderId, eventType: 'os.created' },
+      select: { payloadJson: true },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+    });
+    for (const ev of opened) {
+      const t = tryDecrypt((ev.payloadJson as { trackingTokenEnc?: string } | null)?.trackingTokenEnc);
+      if (t && isActive(t)) return t;
+    }
+    return null;
   }
 
   private async blockDelivery(id: string, lastError: string) {
@@ -92,7 +133,11 @@ export class MessagingProcessor implements OnModuleInit {
     let link = `${env.APP_URL}/status`;
     try {
       if (payload.quoteTokenEnc) link = `${env.APP_URL}/quote#token=${crypto.decrypt(payload.quoteTokenEnc)}`;
-      else if (payload.trackingTokenEnc && order) link = `${env.APP_URL}/status/${order.number}#token=${crypto.decrypt(payload.trackingTokenEnc)}`;
+      else if (order) {
+        // todo evento leva o link completo de acompanhamento (antes só o de "OS recebida")
+        const token = await this.trackingToken(d.tenantId, order.id, payload.trackingTokenEnc);
+        if (token) link = `${env.APP_URL}/status/${order.number}#token=${token}`;
+      }
     } catch {
       /* chave rotacionada: usa link genérico */
     }
@@ -118,7 +163,8 @@ export class MessagingProcessor implements OnModuleInit {
       } else {
         // QR/Baileys: sessão tem de estar online; reconecta com credenciais salvas se necessário
         await this.deps.sessions.ensureForSend(channel.id, channel.encryptedCredentialsRef);
-        const text = renderPlaceholders(template.body, vars);
+        // valor_orcamento já vem como "R$ 120,00": evita "R$ R$" quando o texto também escreve "R$"
+        const text = renderPlaceholders(template.body, vars).replace(/R\$\s*(?=R\$)/g, '');
         providerMessageId = (await this.deps.sessions.sendText(channel.id, to, text)).providerMessageId;
       }
       await db.messageDelivery.update({
